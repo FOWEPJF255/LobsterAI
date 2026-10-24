@@ -4834,7 +4834,10 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
   // no scroll event can reach either pagination edge in that state.
   useEffect(() => {
     const container = scrollContainerRef.current;
-    if (!container) return;
+    // The loading row is still mounted when a prepended page commits, so
+    // measure again once it is gone; otherwise a long collapsed turn stops
+    // loading before its user message, which no scroll can then reach.
+    if (!container || isLoadingMoreMessages) return;
     const sessionId = currentSession?.id;
     const offset = currentSession?.messagesOffset ?? 0;
     const loadedCount = currentSession?.messages.length ?? 0;
@@ -4874,6 +4877,7 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
     currentSession?.messages.length,
     currentSession?.messagesOffset,
     currentSession?.totalMessages,
+    isLoadingMoreMessages,
   ]);
 
   // Restore scroll position synchronously before browser paint when messages are prepended
