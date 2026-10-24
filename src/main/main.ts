@@ -15999,6 +15999,7 @@ if (!gotTheLock) {
 
     // Agent model migration — runs after cache warmup so resolveMatchedProvider
     // can match lobsterai-server models without falling back.
+    profiler.mark('agentModelMigration');
     const defaultAgentModelRef = resolveDefaultAgentModelRef();
     const backfilledAgentModels = getCoworkStore().backfillEmptyAgentModels(defaultAgentModelRef);
     const qualifiedAgentModels = migrateAgentModelRefs({
@@ -16012,22 +16013,29 @@ if (!gotTheLock) {
         `[Main] migrated agent model bindings: backfilled=${backfilledAgentModels}, qualified=${qualifiedAgentModels}`,
       );
     }
+    profiler.measure('agentModelMigration');
 
     // One-time migration: move main agent workspace files from the user's
     // working directory to the fixed {STATE_DIR}/workspace-main/ path.
     try {
+      // The engine manager is first constructed here.
+      profiler.mark('openClawEngineManagerInit');
       const engineManager = getOpenClawEngineManager();
+      profiler.measure('openClawEngineManagerInit');
+      profiler.mark('mainWorkspaceMigration');
       migrateMainAgentWorkspace(
         engineManager.getStateDir(),
         getCoworkStore().getConfig().workingDirectory,
         getStore(),
       );
+      profiler.measure('mainWorkspaceMigration');
     } catch (err) {
       console.warn('[OpenClaw] main agent workspace migration failed (non-fatal):', err);
     }
 
     // One-time migration: existing installs switch to the in-app browser before
     // the first config sync renders OpenClaw's browser profile.
+    profiler.mark('browserDisplayModeMigration');
     try {
       if (migrateBrowserDisplayModeToInApp(getStore())) {
         console.log('[Browser] switched the browser display mode to in-app for an existing install.');
@@ -16035,6 +16043,7 @@ if (!gotTheLock) {
     } catch (err) {
       console.warn('[Browser] browser display mode migration failed (non-fatal):', err);
     }
+    profiler.measure('browserDisplayModeMigration');
 
     // An interrupted Windows installer can leave an empty resources/cfmind
     // directory plus win-resources.tar. Recover it before config sync because
