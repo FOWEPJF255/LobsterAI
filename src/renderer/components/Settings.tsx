@@ -4665,7 +4665,7 @@ const Settings: React.FC<SettingsProps> = ({
     switch(activeTab) {
       case 'experimental':
         return (
-          <div className="space-y-4">
+          <div className="space-y-8">
             <DshExperimentalSettings />
             <DecisionModelExperimentalSettings draftRef={decisionModelDraftRef} />
           </div>
