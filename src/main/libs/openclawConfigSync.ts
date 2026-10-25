@@ -3405,14 +3405,14 @@ export class OpenClawConfigSync {
     // otherwise the gateway rejects the config as invalid.
     if (hasPreinstalledPlugin(WeixinPlugin.Id)) {
       const weixinChannelEnabled = !!weixinConfig?.enabled;
+      // ClawBot is a direct-only channel that only the account which scanned
+      // the QR code can reach, so any narrower DM policy can only lock that
+      // owner out. Stored dmPolicy/allowFrom values are ignored on purpose;
+      // the plugin patch makes the plugin honor this over its built-in pairing.
       const weixinChannel: Record<string, unknown> = {
         enabled: weixinChannelEnabled,
-        dmPolicy: weixinConfig?.dmPolicy || 'open',
-        allowFrom: (() => {
-          const ids = weixinConfig?.allowFrom?.length ? [...weixinConfig.allowFrom] : [];
-          if ((weixinConfig?.dmPolicy || 'open') === 'open' && !ids.includes('*')) ids.push('*');
-          return ids;
-        })(),
+        dmPolicy: 'open',
+        allowFrom: ['*'],
       };
       managedConfig.channels = {
         ...((managedConfig.channels as Record<string, unknown>) || {}),
