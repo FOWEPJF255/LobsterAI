@@ -4205,6 +4205,28 @@ describe('OpenClawConfigSync runtime config output', () => {
     expect(config.channels['openclaw-weixin']).not.toHaveProperty('accountId');
   });
 
+  test('always admits every weixin sender regardless of the stored dmPolicy and allowFrom', async () => {
+    for (const dmPolicy of ['allowlist', 'pairing', 'disabled'] as const) {
+      const sync = await createSync({
+        getWeixinConfig: () => ({
+          enabled: true,
+          accountId: '97a130e3b62f@im.bot',
+          dmPolicy,
+          allowFrom: ['wxid_someone_else@im.wechat'],
+          debug: false,
+        }),
+      });
+
+      expect(sync.sync(`weixin-${dmPolicy}`).ok).toBe(true);
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      expect(config.channels[WeixinPlugin.Id]).toEqual({
+        enabled: true,
+        dmPolicy: 'open',
+        allowFrom: ['*'],
+      });
+    }
+  });
+
   test('writes managed browser policy forcing host target', async () => {
     const { OpenClawConfigSync } = await import('./openclawConfigSync');
 
