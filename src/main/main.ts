@@ -397,6 +397,7 @@ import {
   performPendingDataMigrationRestoreSync,
 } from './libs/dataMigration/dataMigrationService';
 import { DesktopNotificationManager } from './libs/desktopNotificationManager';
+import { clearLegacyDevelopmentServerHttpCache } from './libs/developmentHttpCache';
 import {
   buildDevelopmentProtocolArgs,
   DevelopmentProtocolSwitch,
@@ -15660,6 +15661,16 @@ if (!gotTheLock) {
     profiler.measure('app.whenReady');
     console.log('[Main] initApp: app is ready');
 
+    // Immutable Vite deps cached before vite.config.ts switched them to no-cache
+    // can stop the dev renderer from mounting. One-time; awaited before any window.
+    const developmentHttpCacheCleared = isDev
+      ? clearLegacyDevelopmentServerHttpCache({
+        session: session.defaultSession,
+        serverUrl: DEV_SERVER_URL,
+        userDataPath: app.getPath('userData'),
+      })
+      : null;
+
     // Note: Calendar permission is checked on-demand when calendar operations are requested
     // We don't trigger permission dialogs at startup to avoid annoying users
 
@@ -16099,6 +16110,12 @@ if (!gotTheLock) {
       isDev,
       startUrl: process.env.ELECTRON_START_URL,
     });
+
+    if (developmentHttpCacheCleared) {
+      profiler.mark('developmentHttpCache');
+      await developmentHttpCacheCleared;
+      profiler.measure('developmentHttpCache');
+    }
 
     profiler.mark('createWindow');
     console.log('[Main] initApp: creating window');
