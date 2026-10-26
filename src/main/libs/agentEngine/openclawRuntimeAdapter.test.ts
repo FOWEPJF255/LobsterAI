@@ -5893,6 +5893,78 @@ previous context
   ]);
 });
 
+test('visible subagent child with a dashboard key syncs its full transcript, not channel text', async () => {
+  const childKey = 'agent:blog:dashboard:visible-child';
+  const { session, store, getReplaceCallCount, getLastReplaceSessionArgs } = createReconcileStore([
+    { id: 'msg-1', type: 'user', content: '发布这篇文章', timestamp: 1, metadata: {} },
+    { id: 'msg-2', type: 'assistant', content: '先检查仓库结构', timestamp: 2, metadata: {} },
+    { id: 'msg-3', type: 'assistant', content: '已发布', timestamp: 3, metadata: {} },
+  ]);
+  const subagentRunStore = {
+    hasChildSession: (childSessionId: string) => childSessionId === session.id,
+  };
+
+  const adapter = new OpenClawRuntimeAdapter(store, {}, {}, subagentRunStore as never);
+  adapter.gatewayClient = {
+    start: () => {},
+    stop: () => {},
+    request: async () => ({
+      messages: [
+        { role: 'user', content: '发布这篇文章', timestamp: 10 },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: '先检查仓库结构' },
+            { type: 'toolCall', id: 'call-1', name: 'exec', arguments: { command: 'git status' } },
+          ],
+          timestamp: 20,
+        },
+        { role: 'toolResult', toolCallId: 'call-1', toolName: 'exec', content: 'clean', timestamp: 30 },
+        { role: 'assistant', content: '已发布', timestamp: 40 },
+      ],
+    }),
+  };
+
+  await adapter.syncSessionHistoryFromGateway(session.id, childKey);
+
+  expect(getReplaceCallCount()).toBe(0);
+  expect(getLastReplaceSessionArgs()?.messages.map(message => message.type)).toEqual([
+    'user',
+    'assistant',
+    'tool_use',
+    'tool_result',
+    'assistant',
+  ]);
+});
+
+test('subagent history sync keeps the local transcript when the gateway window starts mid-run', async () => {
+  const { session, store, getReplaceCallCount, getReplaceSessionCallCount } = createReconcileStore([
+    { id: 'msg-1', type: 'user', content: '发布这篇文章', timestamp: 1, metadata: {} },
+    { id: 'msg-2', type: 'assistant', content: '先检查仓库结构', timestamp: 2, metadata: {} },
+  ]);
+  const historyParams: unknown[] = [];
+
+  const adapter = new OpenClawRuntimeAdapter(store, {});
+  adapter.gatewayClient = {
+    start: () => {},
+    stop: () => {},
+    request: async (_method: string, params?: unknown) => {
+      historyParams.push(params);
+      return {
+        hasMore: true,
+        messages: [{ role: 'assistant', content: '发布完成', timestamp: 30 }],
+      };
+    },
+  };
+
+  await adapter.syncSessionHistoryFromGateway(session.id, 'agent:blog:subagent:abc');
+
+  expect(historyParams).toEqual([{ sessionKey: 'agent:blog:subagent:abc', limit: 1000 }]);
+  expect(getReplaceSessionCallCount()).toBe(0);
+  expect(getReplaceCallCount()).toBe(0);
+  expect(session.messages.map(message => message.content)).toEqual(['发布这篇文章', '先检查仓库结构']);
+});
+
 test('lifecycle fallback repairs managed session assistant text from history', async () => {
   const brokenTable = [
     'OpenClaw 优缺点总结',

@@ -49,6 +49,27 @@ rewrite the intro`;
     ]);
   });
 
+  test('keeps the seeded spawn task as the first turn when the gateway wraps it', () => {
+    const localMessages: CoworkMessage[] = [
+      { id: 'msg-1', type: 'user', content: 'Publish the article.', timestamp: 1 },
+    ] as CoworkMessage[];
+
+    const plan = buildSubagentChildHistorySyncPlan(localMessages, [
+      {
+        role: 'user',
+        content: '[Subagent Context] You are running as a subagent (depth 1/1).\n\n'
+          + '[Subagent Task]\n\nPublish the article.\n\nBegin. Execute the assigned task to completion.\n',
+        timestamp: 10,
+      },
+      { role: 'assistant', content: 'Published.', timestamp: 20 },
+    ]);
+
+    expect(plan.entriesToStore.map(({ type, content }) => ({ type, content }))).toEqual([
+      { type: 'user', content: 'Publish the article.' },
+      { type: 'assistant', content: 'Published.' },
+    ]);
+  });
+
   test('includes subagent tool calls and results in child session history', () => {
     const localMessages: CoworkMessage[] = [
       { id: 'msg-1', type: 'user', content: 'run tests', timestamp: 1, metadata: {} },

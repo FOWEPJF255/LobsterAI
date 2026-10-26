@@ -1646,6 +1646,42 @@ test('subagent upsert notifies creation and actual repeated running timestamp wr
   expect(listener.mock.calls.map(call => call[0].changedSessionIds)).toEqual([[options.id], [options.id]]);
 });
 
+test('subagent upsert seeds the spawn task as the first user message once', () => {
+  insertSession('parent-task');
+  const options = {
+    id: 'child-task',
+    parentSessionId: 'parent-task',
+    childSessionKey: 'agent:blog:subagent:child-task',
+    title: 'Publish',
+    agentId: 'main',
+    task: '  Publish the translated article.\n',
+    createdAt: 1234,
+  };
+  store.upsertSubagentChildSession(options);
+  store.addMessage(options.id, { type: 'system', content: 'Subagent failed.' }, 2000);
+  store.upsertSubagentChildSession({ ...options, status: 'error' });
+
+  expect(store.getSession(options.id)?.messages.map(({ type, content, timestamp }) => ({ type, content, timestamp })))
+    .toEqual([
+      { type: 'user', content: 'Publish the translated article.', timestamp: 1234 },
+      { type: 'system', content: 'Subagent failed.', timestamp: 2000 },
+    ]);
+});
+
+test('subagent upsert without a task leaves the child transcript empty', () => {
+  insertSession('parent-no-task');
+  store.upsertSubagentChildSession({
+    id: 'child-no-task',
+    parentSessionId: 'parent-no-task',
+    childSessionKey: 'agent:blog:subagent:child-no-task',
+    title: 'Child',
+    agentId: 'main',
+    task: '   ',
+  });
+
+  expect(store.getSession('child-no-task')?.messages).toEqual([]);
+});
+
 test('outer session transaction publishes final values once and drops rollback or reverted writes', () => {
   insertSession('transaction-projection', 'main', 'Original', 1000);
   const listener = vi.fn();

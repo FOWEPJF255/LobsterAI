@@ -3824,6 +3824,21 @@ export class CoworkStore {
             createdAt,
             now,
           );
+
+        // The spawn task is the child's first user turn, but the gateway writes
+        // it only after the child run starts, and a long run's history window
+        // no longer reaches it. Seed it so the child session opens with its input.
+        const task = options.task?.trim();
+        if (task) {
+          this.db
+            .prepare(
+              `
+              INSERT INTO cowork_messages (id, session_id, type, content, metadata, created_at, sequence)
+              VALUES (?, ?, 'user', ?, NULL, ?, 1)
+            `,
+            )
+            .run(uuidv4(), options.id, task, createdAt);
+        }
       }
     });
 

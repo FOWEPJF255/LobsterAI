@@ -265,6 +265,9 @@ const GATEWAY_READY_TIMEOUT_MS = 60_000;
 const BROWSER_GATEWAY_REQUEST_TIMEOUT_MS = 30_000;
 const BROWSER_GATEWAY_REQUEST_TIMEOUT_SLACK_MS = 5_000;
 const FINAL_HISTORY_SYNC_LIMIT = 50;
+// A subagent child transcript is replaced wholesale from chat.history, so it
+// needs the whole run (the gateway's per-request maximum), not a tail window.
+const SUBAGENT_CHILD_HISTORY_SYNC_LIMIT = 1000;
 const CHANNEL_SESSION_DISCOVERY_LIMIT = 200;
 export const OPENCLAW_CHAT_SEND_PAYLOAD_LIMIT_BYTES = 30 * 1000 * 1000;
 export const OPENCLAW_CHAT_SEND_PAYLOAD_SAFETY_MARGIN_BYTES = 500 * 1000;
@@ -11260,7 +11263,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     sessionKey: string,
     options?: { isFullSync?: boolean },
   ): Promise<void> {
-    if (isSubagentSessionKey(sessionKey)) {
+    if (isSubagentSessionKey(sessionKey) || this.subagentTracker.isChildSession(sessionId)) {
       await this.syncSubagentChildHistory(sessionId, sessionKey, options);
       return;
     }
@@ -11276,7 +11279,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
   private async syncSubagentChildHistory(
     sessionId: string,
     sessionKey: string,
-    options?: { isFullSync?: boolean },
+    _options?: { isFullSync?: boolean },
   ): Promise<void> {
     const client = this.gatewayClient;
     if (!client) {
@@ -11284,14 +11287,10 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
       return;
     }
 
-    const limit = options?.isFullSync
-      ? OpenClawRuntimeAdapter.FULL_HISTORY_SYNC_LIMIT
-      : FINAL_HISTORY_SYNC_LIMIT;
-
     try {
-      const history = await client.request<{ messages?: unknown[] }>('chat.history', {
+      const history = await client.request<{ messages?: unknown[]; hasMore?: boolean }>('chat.history', {
         sessionKey,
-        limit,
+        limit: SUBAGENT_CHILD_HISTORY_SYNC_LIMIT,
       }, { timeoutMs: 10_000 });
       if (!Array.isArray(history?.messages) || history.messages.length === 0) {
         this.channelSyncCursor.set(sessionId, 0);
@@ -11305,6 +11304,17 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
         previousCountKnown: previousHistoryCountKnown,
         previousCount: previousHistoryCount,
       });
+
+      // Older records exist before this window (a very long run, or the
+      // gateway's byte cap). Replacing the transcript with it would drop the
+      // task and the earliest steps, so keep the streamed local transcript.
+      if (history.hasMore === true) {
+        console.debug(
+          '[SubagentHistorySync] skipped truncated history window - sessionId:', sessionId,
+          'messages:', history.messages.length,
+        );
+        return;
+      }
 
       const session = this.store.getSession(sessionId);
       if (!session) return;
