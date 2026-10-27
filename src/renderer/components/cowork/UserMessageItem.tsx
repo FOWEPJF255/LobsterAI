@@ -7,6 +7,7 @@ import {
   type CoworkImageAttachmentPreview,
   isBrowserAnnotationTransportImage,
 } from '../../../shared/cowork/imageAttachments';
+import { expandPastedTextBlocks, extractPastedTextBlocks } from '../../../shared/cowork/pastedText';
 import type { CoworkSelectedTextSnippet } from '../../../shared/cowork/selectedText';
 import type { KitReference } from '../../../shared/kit/constants';
 import { copyTextToClipboard } from '../../services/clipboard';
@@ -36,7 +37,10 @@ import {
   COWORK_DETAIL_GUTTER_CLASS,
   messageMetaClassName,
 } from './messageDisplayUtils';
+import { UserMessagePastedTexts } from './PastedTextCards';
 import SelectedTextSnippetBadge from './SelectedTextSnippetBadge';
+import { countUserMessageLines } from './userMessageCollapse';
+import UserMessageCollapsible from './UserMessageCollapsible';
 import UserMessageContent from './UserMessageContent';
 import UserMessageFileAttachments from './UserMessageFileAttachments';
 
@@ -214,14 +218,20 @@ const UserMessageItem: React.FC<{
   const metadata = message.metadata as CoworkMessageMetadata | undefined;
   const imageEdits = useImageEditSnapshots(message, sessionId);
   const isGoalSettingMessage = hasGoalSettingMessageMetadata(metadata);
-  const { text: displayContent, attachments: fileAttachments } = useMemo(
-    () => extractUserMessageFileAttachments(parseUserMessageForDisplay(message.content || '', {
-      localMediaAttachments: Array.isArray(metadata?.localMediaAttachments)
-        ? metadata.localMediaAttachments
-        : [],
-    })),
-    [message.content, metadata?.localMediaAttachments]
-  );
+  const { text: displayContent, attachments: fileAttachments, pastedTexts } = useMemo(() => {
+    // Pasted-text blocks are kept verbatim, so split them out before the
+    // display parser normalizes IM metadata and blank lines.
+    const { text, blocks } = extractPastedTextBlocks(message.content || '');
+    return {
+      ...extractUserMessageFileAttachments(parseUserMessageForDisplay(text, {
+        localMediaAttachments: Array.isArray(metadata?.localMediaAttachments)
+          ? metadata.localMediaAttachments
+          : [],
+      })),
+      pastedTexts: blocks,
+    };
+  }, [message.content, metadata?.localMediaAttachments]);
+  const copyContent = useMemo(() => expandPastedTextBlocks(message.content || ''), [message.content]);
 
   const messageSkillIds = Array.isArray(metadata?.skillIds) ? metadata.skillIds : [];
   const messageSkills = messageSkillIds
@@ -253,6 +263,7 @@ const UserMessageItem: React.FC<{
     && !imageEdits.some(snapshot => snapshot.source.filePath === image.localPath)
   );
   const hasCapabilityBadges = messageKitReferences.length > 0 || messageSkills.length > 0;
+  const hasPastedTexts = pastedTexts.length > 0;
   const handleImagePreviewOpen = useCallback((image: ImagePreviewSource) => {
     reportConversationMessageAction({
       actionType: 'open_message_image',
@@ -267,6 +278,12 @@ const UserMessageItem: React.FC<{
     });
     onReEdit?.(message);
   }, [message, onReEdit]);
+  const handlePastedTextOpen = useCallback(() => {
+    reportConversationMessageAction({
+      actionType: 'open_message_pasted_text',
+      message,
+    });
+  }, [message]);
   const handleFileAttachmentReveal = useCallback(() => {
     reportConversationMessageAction({
       actionType: 'reveal_message_file',
@@ -308,7 +325,7 @@ const UserMessageItem: React.FC<{
                   />
                 )}
                 {browserAnnotationCount > 0 && (
-                  <div className={(selectedTextSnippets.length > 0 || displayContent?.trim() || displayImageAttachments.length > 0 || fileAttachments.length > 0 || hasCapabilityBadges) ? 'mb-2' : ''}>
+                  <div className={(selectedTextSnippets.length > 0 || hasPastedTexts || displayContent?.trim() || displayImageAttachments.length > 0 || fileAttachments.length > 0 || hasCapabilityBadges) ? 'mb-2' : ''}>
                     <BrowserAnnotationAttachmentBadge
                       draftKey={sessionId ?? ''}
                       batches={browserAnnotations}
@@ -320,7 +337,7 @@ const UserMessageItem: React.FC<{
                   </div>
                 )}
                 {selectedTextSnippets.length > 0 && (
-                  <div className={(displayContent?.trim() || displayImageAttachments.length > 0 || fileAttachments.length > 0 || hasCapabilityBadges) ? 'mb-2' : ''}>
+                  <div className={(hasPastedTexts || displayContent?.trim() || displayImageAttachments.length > 0 || fileAttachments.length > 0 || hasCapabilityBadges) ? 'mb-2' : ''}>
                     <SelectedTextSnippetBadge
                       snippets={selectedTextSnippets}
                       align="right"
@@ -329,21 +346,30 @@ const UserMessageItem: React.FC<{
                   </div>
                 )}
                 {hasCapabilityBadges && (
-                  <div className={(displayContent?.trim() || displayImageAttachments.length > 0 || fileAttachments.length > 0) ? 'mb-2' : ''}>
+                  <div className={(hasPastedTexts || displayContent?.trim() || displayImageAttachments.length > 0 || fileAttachments.length > 0) ? 'mb-2' : ''}>
                     <UserMessageCapabilityBadges
                       kitReferences={messageKitReferences}
                       skills={messageSkills}
                     />
                   </div>
                 )}
+                {hasPastedTexts && (
+                  <UserMessagePastedTexts
+                    blocks={pastedTexts}
+                    className={(displayContent?.trim() || displayImageAttachments.length > 0 || fileAttachments.length > 0) ? 'mb-2' : ''}
+                    onOpen={handlePastedTextOpen}
+                  />
+                )}
                 {displayContent?.trim() && (
-                  <div data-cowork-search-message-id={message.id}>
-                    <UserMessageContent
-                      content={displayContent}
-                      className="max-w-none"
-                      onImageClick={handleImagePreviewOpen}
-                    />
-                  </div>
+                  <UserMessageCollapsible lineCount={countUserMessageLines(displayContent)}>
+                    <div data-cowork-search-message-id={message.id}>
+                      <UserMessageContent
+                        content={displayContent}
+                        className="max-w-none"
+                        onImageClick={handleImagePreviewOpen}
+                      />
+                    </div>
+                  </UserMessageCollapsible>
                 )}
                 {imageEdits.map(snapshot => {
                   const preview = imageAttachmentPreviews.find(image => image.localPath === snapshot.source.filePath);
@@ -385,14 +411,14 @@ const UserMessageItem: React.FC<{
                 <div className={messageMetaClassName(isHovered, 'right')} aria-hidden={!isHovered}>
                   <span>{formatMessageDateTime(message.timestamp)}</span>
                   <CopyButton
-                    content={message.content}
+                    content={copyContent}
                     onCopy={(result) => reportConversationMessageAction({
                       actionType: 'copy_message',
                       message,
                       params: {
                         result,
                         copySource: 'user_message',
-                        copiedLength: message.content.length,
+                        copiedLength: copyContent.length,
                       },
                     })}
                     visible={isHovered}

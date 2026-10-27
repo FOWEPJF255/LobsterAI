@@ -3,6 +3,10 @@ import {
   type CoworkImageAttachmentPayload,
   validateCoworkImageAttachmentSize,
 } from '../../shared/cowork/imageAttachments';
+import {
+  formatPastedTextAttachmentBlocks,
+  isPastedTextAttachment,
+} from '../../shared/cowork/pastedText';
 import type { CoworkSelectedTextSnippet } from '../../shared/cowork/selectedText';
 import {
   computeMediaLabels,
@@ -18,6 +22,7 @@ export interface CoworkPromptAttachment {
   isImage?: boolean;
   isDirectory?: boolean;
   dataUrl?: string;
+  pastedText?: string;
 }
 
 export interface PreparedCoworkPromptPayload {
@@ -176,12 +181,17 @@ export async function prepareCoworkPromptPayload(
     .filter(attachment => (
       !attachment.path.startsWith('inline:')
       && !attachment.imageEdit
+      && !isPastedTextAttachment(attachment)
       && !(attachment.isImage && imageAttachmentPathsWithPayload.has(attachment.path))
     ))
     .map(attachment => `${attachment.isDirectory ? options.folderLabel : options.fileLabel}: ${attachment.path}`)
     .join('\n');
-  let finalPrompt = options.basePrompt
-    ? (attachmentLines ? `${options.basePrompt}\n\n${attachmentLines}` : options.basePrompt)
+  // Pasted-text cards follow the typed prompt in the order they were pasted.
+  const basePrompt = [options.basePrompt, ...formatPastedTextAttachmentBlocks(options.attachments)]
+    .filter(Boolean)
+    .join('\n\n');
+  let finalPrompt = basePrompt
+    ? (attachmentLines ? `${basePrompt}\n\n${attachmentLines}` : basePrompt)
     : attachmentLines;
   const mediaLabels = computeMediaLabels(options.attachments);
   const editLines = mediaLabels.filter(item => item.attachment.imageEdit).map(item =>
