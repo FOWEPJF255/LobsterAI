@@ -5859,7 +5859,7 @@ test('reconcileWithHistory: content mismatch — triggers replace', async () => 
   expect((args.authoritative[1] as Record<string, unknown>).text).toBe('Full complete response from the model.');
 });
 
-test('subagent history sync preserves visible local user text instead of raw outbound prompt', async () => {
+test('subagent history sync preserves existing local user text without rewriting outbound-style content', async () => {
   const rawOutboundPrompt = `[LobsterAI system instructions]
 hidden setup
 
@@ -5888,7 +5888,7 @@ previous context
   await adapter.syncSessionHistoryFromGateway(session.id, 'agent:writer:subagent:abc');
 
   expect(getLastReplaceArgs()?.authoritative).toEqual([
-    { role: 'user', text: '换一颗树再来一次', timestamp: 1, metadata: {} },
+    { role: 'user', text: rawOutboundPrompt, timestamp: 1, metadata: {} },
     { role: 'assistant', text: '新的作文内容', timestamp: 20 },
   ]);
 });
