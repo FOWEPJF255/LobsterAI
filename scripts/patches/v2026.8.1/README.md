@@ -1,5 +1,67 @@
 # OpenClaw v2026.8.1 patch notes
 
+## Stable prefixes across LobsterAI tasks
+
+`zzz-openclaw-session-prefix-cache.patch` moves sessionKey/sessionId/sessionUrl
+out of the actual system prompt for full-mode managed chats
+(`agent:<agent>:lobsterai:<task>` and legacy `lobsterai:<task>`). It also moves the
+current date out of system; the client's per-turn Local Time Context retains
+local date/time, timezone, UTC offset, ISO time and millisecond timestamp.
+Fixed time/cron rules stay in system. Native tool identity, authorization,
+tool catalogs, model routing and session headers are unchanged.
+
+Session identity is omitted only when rendering the final Runtime line through
+`omitRuntimeSessionIdentity`. The original `runtimeInfo` must reach the configured
+prompt builder unchanged: memory preparation/validation and delegation policy
+resolve against its real session key. Clearing that key before assembly causes
+`prepared memory prompt section does not match the current run` before the first
+provider request. The session-cache prompt regression test exercises the real
+preparation/assembly chain and retains rejection of memory from another session.
+
+The runtime builds identity facts from resolved session objects, never by
+parsing user text. It appends a hidden `lobsterai.session-identity.v1` custom
+message after the current user message, using the normal transcript writer.
+Only missing/changed identity is appended. The original bytes and message order
+survive replay, retries and subsequent turns. Forked identities are superseded
+by a new snapshot; pre-prompt and in-turn compaction restore missing facts.
+This message is intentionally distinct from transient `openclaw.runtime-context`.
+Raw probes, minimal/none prompts and non-managed sessions retain existing system
+behavior. The client retains the previous time rules in its per-turn snapshot
+as well, so minimal/raw modes and older runtimes do not lose cron guidance.
+
+The client captures time once after gateway startup, workspace rehydration and
+history probing, immediately before returning the assembled outbound prompt.
+It appends that snapshot after the user request and other context; turn-start
+timing is used only for latency telemetry. Tool loops and gateway/provider retries reuse that persisted string;
+old history is not regenerated. Long-running tasks can still query
+`session_status` for fresh time.
+
+A replayed keyed user followed by an identity snapshot is acknowledged through
+the guarded session manager before invoking the provider. The acknowledgement
+consumes both prepared-user correlation and one-shot persistence suppression,
+without appending a duplicate, moving the user, or rewriting historical rows.
+Subsequent steering and follow-up messages therefore persist normally. Both
+runtime-only and normal prompt submission forward this acknowledgement.
+
+The generated time footer has versioned comment boundaries. History recovery
+removes only the complete generated trailing block from newly imported gateway
+user messages (including the complete pre-marker legacy format). Existing local
+user text stays authoritative and unchanged; source gateway history is never
+modified. Ordinary headings, partial quotes and non-trailing text are preserved.
+
+Rebuild and ship the runtime together with the client changes; installing only
+the TypeScript prompt change does not apply the system-prompt fix. Patch source
+sentinels enforce the complete producer/dispatch/persistence chain, and the
+runtime's `runtime-build-info.json.patchHash` must match the versioned patch set.
+No server API, database or admin changes are required. Cache benefits require
+the same upstream source and unchanged tool/workspace configuration; cache
+eviction, fallback and compaction can still require warming a new prefix.
+
+Remove this patch only when upstream provides equivalent stable system input,
+persistent identity facts and compaction restoration. Check cross-session system
+and tool equality, first-send versus replay order, retries, fork, compaction,
+time-sensitive cron behavior and old session restoration on upgrades.
+
 ## Config candidate revision cache (upstream backport)
 
 `openclaw-config-candidate-cache-invalidation.patch` backports the production
@@ -922,3 +984,42 @@ history stays a cache miss once and later turns append to it normally.
 Removal: v2026.10.10-beta.3 and later main contain #169063; stable v2026.10.6
 does not. Remove this patch when the pinned upstream contains it, and rerun the
 follow-up cache check above.
+
+## Heartbeat trace ownership and exec-event cost
+
+`openclaw-heartbeat-cost-isolation.patch` discards the ambient trace inherited by
+heartbeat timers. Local exec snapshots its originating trace at spawn and carries
+that explicit provenance on its completion event. The resulting heartbeat uses
+a new span/run under the originating trace, so its model costs stay on that exact
+user turn in both the desktop and Portal. Generic heartbeats without an originating
+exec retain a fresh root; they never borrow the latest user turn.
+
+Queued exec completions are partitioned by originating trace before prompt and
+delivery selection. After consumption, remaining completions receive another wake;
+if polling invalidates a selected batch during preparation, pending batches are
+reawakened without invoking the model for the stale selection. Scheduled task
+wakes retain their own root. The desktop refreshes the persisted originating turn
+after a late model request finishes, using server display totals (sum of individually
+rounded ledger rows). It recovers exact trace bindings from the current account's
+store and never reassigns an already registered desktop trace.
+
+After asynchronous routing/session/runtime preparation, an exec-completion wake
+rechecks the identities of its inspected completion events. If process polling
+has already acknowledged all of them, the wake skips model invocation with
+`no-pending-event`. New/replacement events and unrelated queue entries remain
+untouched. The existing early preflight check stays in place.
+
+Only isolated exec-completion acknowledgements with no user delivery, scheduled
+tick/tasks, cron events or attached monitor instructions use an empty skill
+filter and a per-run tool allowlist (only `heartbeat_respond` when required).
+Normal turns, scheduled work, alerts and actionable continuations retain their
+capabilities. This uses the existing reply options rather than global tool or
+skill configuration. Lightweight bootstrap mode alone does not remove skills
+or tool schemas.
+
+Build the patched OpenClaw source and the Electron client together, and package
+the updated `lobster-model-routing` extension before release. A running Gateway
+keeps its old runtime until restarted. Historical usage rows are unchanged;
+actual token savings require a new execution against the rebuilt runtime.
+Remove the patch when upstream provides equivalent trace ownership, late
+completion checks and scoped context reduction.
