@@ -37,6 +37,12 @@ import {
   CoworkImageAttachmentRole,
   formatCoworkImageAttachmentLimit,
 } from '../../../shared/cowork/imageAttachments';
+import {
+  type CoworkPastedTextBlock,
+  createPastedTextAttachment,
+  isPastedTextAttachment,
+  shouldPasteAsTextCard,
+} from '../../../shared/cowork/pastedText';
 import { isPlanImplementationApproval } from '../../../shared/cowork/planMode';
 import type { CoworkSelectedTextSnippet } from '../../../shared/cowork/selectedText';
 import {
@@ -169,6 +175,7 @@ import {
   resolveMediaMentionTrigger,
 } from './mediaMentionUtils';
 import MediaModelPicker from './MediaModelPicker';
+import { PastedTextAttachmentCard } from './PastedTextCards';
 import {
   getAttachmentAnalyticsParams,
   getKitAnalyticsParams,
@@ -424,6 +431,8 @@ export interface CoworkPromptInputRef {
   setImageAttachments: (images: CoworkImageAttachment[]) => void;
   /** 设置选中的 assistant 文本片段（用于重新编辑消息时还原上下文） */
   setSelectedTextSnippets: (snippets: CoworkSelectedTextSnippet[]) => void;
+  /** 追加粘贴文本卡片（用于重新编辑消息时还原大段粘贴） */
+  addPastedTexts: (blocks: CoworkPastedTextBlock[]) => void;
   /** 聚焦输入框 */
   focus: () => void;
   /** 以当前草稿（文本/附件/浏览器注释）触发一次提交，等价于点击发送按钮 */
@@ -644,6 +653,11 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
     },
     setSelectedTextSnippets: (snippets: CoworkSelectedTextSnippet[]) => {
       dispatch(setDraftSelectedTextSnippets({ draftKey, snippets }));
+    },
+    addPastedTexts: (blocks: CoworkPastedTextBlock[]) => {
+      for (const block of blocks) {
+        dispatch(addDraftAttachment({ draftKey, attachment: createPastedTextAttachment(block.text) }));
+      }
     },
     focus: () => {
       textareaRef.current?.focus();
@@ -1638,6 +1652,7 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
         ...(attachment.path.startsWith('inline:') && attachment.dataUrl
           ? { dataUrl: attachment.dataUrl }
           : {}),
+        ...(attachment.pastedText !== undefined ? { pastedText: attachment.pastedText } : {}),
       }));
       const queuedCapabilities = buildCoworkCapabilitySelection(
         activeSkillIds,
@@ -2943,10 +2958,46 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
   const handlePaste = useCallback((event: React.ClipboardEvent<HTMLTextAreaElement>) => {
     if (disabled || voiceInputLocksEditing) return;
     const files = getClipboardAttachmentFiles(event.clipboardData);
-    if (files.length === 0) return;
+    if (files.length > 0) {
+      event.preventDefault();
+      void handleIncomingFiles(files, 'paste');
+      return;
+    }
+    // Steers and goal objectives are sent as plain text, so keep pastes inline there.
+    if (steerInputActive || goalInputActive) return;
+    const pastedText = event.clipboardData.getData('text/plain');
+    if (!shouldPasteAsTextCard(pastedText)) return;
     event.preventDefault();
-    void handleIncomingFiles(files, 'paste');
-  }, [disabled, handleIncomingFiles, voiceInputLocksEditing]);
+    const attachment = createPastedTextAttachment(pastedText);
+    dispatch(addDraftAttachment({ draftKey, attachment }));
+    reportPromptControl('pasted_text_card_create', {
+      pastedTextLength: attachment.pastedText.length,
+    });
+  }, [disabled, dispatch, draftKey, goalInputActive, handleIncomingFiles, reportPromptControl, steerInputActive, voiceInputLocksEditing]);
+
+  const handleInsertPastedTextAsText = useCallback((path: string) => {
+    const attachment = attachments.find(item => item.path === path);
+    if (!attachment || !isPastedTextAttachment(attachment)) return;
+    const textarea = textareaRef.current;
+    const selectionStart = textarea?.selectionStart ?? value.length;
+    const selectionEnd = textarea?.selectionEnd ?? value.length;
+    const nextValue = `${value.slice(0, selectionStart)}${attachment.pastedText}${value.slice(selectionEnd)}`;
+    const caret = selectionStart + attachment.pastedText.length;
+    setValue(nextValue);
+    dispatch(setDraftAttachments({
+      draftKey,
+      attachments: attachments.filter(item => item.path !== path),
+    }));
+    reportPromptControl('pasted_text_card_insert', {
+      pastedTextLength: attachment.pastedText.length,
+    });
+    requestAnimationFrame(() => {
+      const nextTextarea = textareaRef.current;
+      if (!nextTextarea) return;
+      nextTextarea.focus();
+      nextTextarea.setSelectionRange(caret, caret);
+    });
+  }, [attachments, dispatch, draftKey, reportPromptControl, value]);
 
   const canSubmit = !disabled
     && !submitDisabled
@@ -3381,6 +3432,17 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
       {attachments.map((attachment) => {
         if (attachment.imageEdit) return <ImageEditDraftCard key={attachment.path} request={attachment.imageEdit}
           onRemove={() => handleRemoveAttachment(attachment.path)} />;
+        if (isPastedTextAttachment(attachment)) {
+          return (
+            <PastedTextAttachmentCard
+              key={attachment.path}
+              path={attachment.path}
+              text={attachment.pastedText}
+              onRemove={handleRemoveAttachment}
+              onInsertAsText={handleInsertPastedTextAsText}
+            />
+          );
+        }
         const ml = mediaLabels.find(m => m.attachment.path === attachment.path);
         return (
           <AttachmentCard

@@ -112,4 +112,40 @@ describe('prepareCoworkPromptPayload', () => {
       },
     });
   });
+
+  test('embeds pasted-text cards after the prompt and before file lines', async () => {
+    const result = await prepareCoworkPromptPayload({
+      basePrompt: 'why does this fail?',
+      attachments: [
+        { path: '/tmp/app.log', name: 'app.log' },
+        { path: 'pasted:p1', name: 'Error: boom', pastedText: 'Error: boom\nat main()' },
+      ],
+      selectedTextSnippets: [],
+      modelSupportsImage: false,
+      fileLabel: 'File',
+      folderLabel: 'Folder',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      payload: {
+        finalPrompt: 'why does this fail?\n\n'
+          + '<pasted_text id="p1">\nError: boom\nat main()\n</pasted_text id="p1">\n\n'
+          + 'File: /tmp/app.log',
+      },
+    });
+  });
+
+  test('sends a pasted-text card on its own without a typed prompt', async () => {
+    const result = await prepareCoworkPromptPayload({
+      basePrompt: '',
+      attachments: [{ path: 'pasted:p2', name: 'notes', pastedText: 'notes' }],
+      selectedTextSnippets: [],
+      modelSupportsImage: false,
+      fileLabel: 'File',
+      folderLabel: 'Folder',
+    });
+
+    expect(result.success && result.payload.finalPrompt).toBe('<pasted_text id="p2">\nnotes\n</pasted_text id="p2">');
+  });
 });
