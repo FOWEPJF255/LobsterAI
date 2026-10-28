@@ -458,7 +458,7 @@ import { getKeyfromAttribution, initializeKeyfromAttribution } from './libs/keyf
 import { LibraryThumbnailRenderer } from './libs/libraryThumbnailRenderer';
 import { LibraryThumbnailService } from './libs/libraryThumbnailService';
 import { shouldRejectNativeLibraryThumbnail } from './libs/libraryThumbnailValidation';
-import { configureUsageTitleReporter, getMediaUsageContext, reportUsageSessionTitle } from './libs/llmUsageContext';
+import { configureLlmUsageContextResolver, configureUsageTitleReporter, getMediaUsageContext, reportUsageSessionTitle } from './libs/llmUsageContext';
 import {
   resolveLobsterBrowserMcpCommand,
   resolveLobsterBrowserMcpStdioLaunch,
@@ -6077,10 +6077,49 @@ if (!gotTheLock) {
     return response;
   };
 
+  configureLlmUsageContextResolver((traceId, registration) => {
+    const currentOwner = getAuthSessionKey();
+    const context = registration ? { ...registration, owner: registration.owner ?? currentOwner } : null;
+    const target = getCoworkStore().findUserMessageByTrace(traceId, registration?.sessionId);
+    if (!target) return context;
+    const trace = target.message.metadata?.llmTrace;
+    if (!trace) return context;
+    const scope = getCurrentMediaAccountScope();
+    let persisted = trace.usageContext;
+    if (!persisted) {
+      // Only live registration proves ownership of legacy metadata. Recovery
+      // never assigns an old trace to whoever happens to be signed in now.
+      if (!context || !scope || context.owner !== currentOwner) {
+        return { ...context, sessionId: target.sessionId, userMessage: target.message.content, owner: null };
+      }
+      const admittedScope = mediaTurnAccountScopeBySession.get(target.sessionId);
+      if (admittedScope && !isMediaAccountScopeSnapshotCurrent(admittedScope, scope)) {
+        return { ...context, owner: null };
+      }
+      persisted = { sessionId: target.sessionId, ownerAccountKey: scope.ownerAccountKey, serverBaseUrl: getServerApiBaseUrl() };
+      getCoworkStore().updateMessage(target.sessionId, target.message.id, {
+        metadata: { ...target.message.metadata, llmTrace: { ...trace, usageContext: persisted } },
+      });
+    }
+    const sameOwner = persisted.ownerAccountKey === scope?.ownerAccountKey
+      && persisted.serverBaseUrl === getServerApiBaseUrl();
+    return {
+      ...context,
+      sessionId: target.sessionId,
+      userMessage: target.message.content,
+      modelPresetId: target.message.metadata?.modelPresetId,
+      resolvedModelId: target.message.metadata?.resolvedModelId,
+      owner: sameOwner ? currentOwner : null,
+    };
+  });
+
   coworkTurnUsageService = new CoworkTurnUsageService({
     getStore: () => getCoworkStore(),
     fetchWithAuth,
     hasAuthTokens: () => Boolean(getAuthTokens()?.accessToken),
+    getSessionKey: getAuthSessionKey,
+    isTurnActive: (sessionId, messageId) => Boolean(coworkEngineRouter?.isSessionActive(sessionId))
+      && getCoworkStore().getLatestUserMessage(sessionId)?.id === messageId,
     buildServerUrl: pathWithQuery => appendKeyfromQuery(`${getServerApiBaseUrl()}${pathWithQuery}`),
     getTraceStats: getOpenClawTokenProxyTraceStats,
     claimNativeRunTurnUsage,
@@ -15851,6 +15890,11 @@ if (!gotTheLock) {
         getServerBaseUrl: getServerApiBaseUrl,
         getAccountContextHeaders: getEnterpriseAccountHeaders,
         getSessionKey: getAuthSessionKey,
+        onRequestFinished: origin => {
+          void coworkTurnUsageService?.refreshExactTrace(origin).catch(error => {
+            console.warn('[TurnUsage] failed to refresh completed background request usage.', error);
+          });
+        },
         getClientVersion: () => app.getVersion(),
         getEnterpriseAuthSessionSnapshot: captureEnterpriseAuthSessionSnapshot,
         onEnterpriseMembershipRevoked: event => {

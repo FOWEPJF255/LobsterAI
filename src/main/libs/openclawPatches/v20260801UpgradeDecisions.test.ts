@@ -28,6 +28,7 @@ const RETAINED_PATCHES = [
   'openclaw-exec-command-description.patch',
   'openclaw-gateway-client-request-traceparent.patch',
   'openclaw-gateway-fast-path-rejection-handler.patch',
+  'openclaw-heartbeat-cost-isolation.patch',
   'openclaw-im-bound-agent-run-cwd.patch',
   'openclaw-inferred-plugin-install-allowlist.patch',
   'openclaw-lancedb-optional-transformers.patch',
@@ -82,6 +83,7 @@ const RETAINED_PATCHES = [
   'zz-openclaw-plan-completion-check.patch',
   'zz-openclaw-task-cwd-system-prompt.patch',
   'zzz-openclaw-plugin-degraded-startup.patch',
+  'zzz-openclaw-session-prefix-cache.patch',
 ] as const;
 
 const RETIRED_PATCHES = [

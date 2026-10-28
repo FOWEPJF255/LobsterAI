@@ -1442,6 +1442,134 @@ v20260801StrongPatchValidators['zz-openclaw-plan-completion-check.patch'] = [
   },
 ];
 
+v20260801StrongPatchValidators['zzz-openclaw-session-prefix-cache.patch'] = [
+  {
+    file: 'src/agents/lobsterai-session-snapshot.ts',
+    snippets: ['lobsterai.session-identity.v1', 'buildLobsterAiSessionSnapshotMessage'],
+  },
+  {
+    file: 'src/agents/embedded-agent-runner/run/attempt-system-prompt-prepare.ts',
+    snippets: [
+      'omitRuntimeSessionIdentity: sessionIdentitySnapshot !== undefined',
+      'userDate: sessionIdentitySnapshot ? "" : userDate',
+      'sessionIdentitySnapshot ? LOBSTERAI_RUNTIME_FACTS_INSTRUCTIONS : undefined',
+    ],
+    forbiddenSnippets: ['sessionKey: undefined, sessionId: undefined, sessionUrl: undefined'],
+  },
+  {
+    file: 'src/agents/embedded-agent-runner/system-prompt.ts',
+    snippets: ['omitRuntimeSessionIdentity: params.omitRuntimeSessionIdentity'],
+  },
+  {
+    file: 'src/agents/system-prompt.ts',
+    snippets: [
+      'params.omitRuntimeSessionIdentity',
+      'sessionKey: undefined, sessionId: undefined, sessionUrl: undefined',
+    ],
+  },
+  {
+    file: 'src/agents/embedded-agent-runner/run/attempt-system-prompt.session-cache.test.ts',
+    snippets: ['preserves prepared memory ownership while keeping task identity out of system text'],
+  },
+  {
+    file: 'src/agents/embedded-agent-runner/run/attempt-settle.ts',
+    snippets: [
+      'sessionIdentitySnapshot: systemPrompt.sessionIdentitySnapshot',
+      'acknowledgePersistedUserReplay: sessionManager.acknowledgeReplayedUserMessage',
+    ],
+  },
+  {
+    file: 'src/agents/embedded-agent-runner/run/attempt-prompt-phase.ts',
+    snippets: [
+      'persistentRuntimeContext: buildLobsterAiSessionSnapshotMessage(',
+      'acknowledgePersistedUserReplay: input.acknowledgePersistedUserReplay',
+    ],
+  },
+  {
+    file: 'src/agents/embedded-agent-runner/run/attempt-prompt-submit.ts',
+    snippets: [
+      'persistentRuntimeContext: input.persistentRuntimeContext',
+      'acknowledgePersistedUserReplay: input.acknowledgePersistedUserReplay',
+    ],
+  },
+  {
+    file: 'src/agents/session-tool-result-guard-wrapper.ts',
+    snippets: [
+      'key !== pendingPreparedUserTurnMessage?.idempotencyKey',
+      'return await guard.acknowledgeReplayedUserMessage(message)',
+    ],
+  },
+  {
+    file: 'src/agents/session-tool-result-guard.ts',
+    snippets: ['acknowledgeReplayedUserMessage: async'],
+    orderedSnippets: [
+      'acknowledgeReplayedUserMessage: async',
+      'const prepared = persistMessage(message)',
+      'suppressNextUserMessagePersistence = false;',
+      'await opts?.onUserMessagePersistenceSuppressed?.(prepared)',
+    ],
+  },
+  {
+    file: 'src/agents/sessions/agent-session-prompting.ts',
+    snippets: [
+      'this.missingRuntimeContext(options?.persistentRuntimeContext)',
+      'this.missingRuntimeContext(this.persistentRuntimeContext)',
+      'this.persistentRuntimeContext = undefined;',
+      'if (!acknowledgedReplay)',
+      'this.runWithSessionWriteSettlement(() => acknowledgeReplay(replayedUser))',
+    ],
+    orderedSnippets: [
+      'messages.push(this.createUserMessage(expandedText, currentImages));',
+      'messages.push(runtimeContext);',
+    ],
+  },
+];
+
+v20260801StrongPatchValidators['openclaw-heartbeat-cost-isolation.patch'] = [
+  {
+    file: 'src/agents/bash-tools.exec-runtime.ts',
+    snippets: [
+      'originTrace: getActiveDiagnosticTraceContext(),',
+      'originTrace: session.originTrace,',
+    ],
+  },
+  {
+    file: 'src/infra/heartbeat-runner-prompt.ts',
+    snippets: [
+      'const execOriginTrace = firstExecEvent?.originTrace;',
+      'event.originTrace?.traceId === execOriginTrace?.traceId',
+      'pendingIds.has(event.id)',
+      'if (params.scheduledTaskCount)',
+    ],
+  },
+  {
+    file: 'src/infra/heartbeat-runner-delivery.ts',
+    snippets: [
+      'requestPendingHeartbeatEventWake(prepared.sessionKey, wake.agentId)',
+    ],
+  },
+  {
+    file: 'src/infra/heartbeat-runner-run.ts',
+    snippets: [
+      'runWithDiagnosticTraceContext(createDiagnosticTraceContext(), () =>',
+      'runHeartbeatOnceInTrace(opts)',
+      'createChildDiagnosticTraceContext(originTrace)',
+      'wake.preflight.execOriginTrace',
+      'HEARTBEAT_SKIP_NO_PENDING_EVENT',
+    ],
+  },
+  {
+    file: 'src/infra/heartbeat-runner-execution.ts',
+    snippets: [
+      'recheckHeartbeatExecBatch(',
+      'return { kind: "no-pending-event" } as const;',
+      'const execTriageOnly =',
+      'skillFilter: [],',
+      'toolsAllow: usesHeartbeatResponseTool ? [HEARTBEAT_RESPONSE_TOOL_NAME] : [],',
+    ],
+  },
+];
+
 const strongPatchValidators = openclawVersion === 'v2026.8.1'
   ? v20260801StrongPatchValidators
   : legacyStrongPatchValidators;

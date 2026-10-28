@@ -29,6 +29,7 @@ import {
   type CoworkTurnUsage,
   type CoworkTurnUsageAnchor,
   getCoworkTurnUsage,
+  isValidLlmTraceId,
 } from '../shared/cowork/llmTurnUsage';
 import type { CoworkModelChange } from '../shared/cowork/modelChange';
 import { OpenClawCronRunMetadataKey } from '../shared/cowork/openclawCronSessionKey';
@@ -514,7 +515,10 @@ export interface CoworkMessageMetadata {
     name?: string;
   }>;
   /** User messages: trace carried by every model request of the turn. */
-  llmTrace?: CoworkLlmTrace;
+  llmTrace?: CoworkLlmTrace & {
+    /** Local origin ownership survives history reconciliation and process reload. */
+    usageContext?: { sessionId: string; ownerAccountKey: string; serverBaseUrl: string };
+  };
   /** User messages: credits and tokens the turn consumed on LobsterAI models. */
   turnUsage?: CoworkTurnUsage;
   /** Server media task IDs created by this turn; prices are read from the server. */
@@ -1424,6 +1428,22 @@ export class CoworkStore {
       [sessionId],
     );
     return row ? this.parseStoredMessage(sessionId, row) : null;
+  }
+
+  /** Exact primary trace only. Fork copies and ambiguous legacy matches are not owners. */
+  findUserMessageByTrace(traceId: string, sessionId?: string): { sessionId: string; message: CoworkMessage } | null {
+    if (!isValidLlmTraceId(traceId)) return null;
+    const rows = this.getAll<CoworkMessageRow & { session_id: string }>(`
+      SELECT id, session_id, type, content, metadata, created_at, sequence
+      FROM cowork_messages
+      WHERE type = 'user' ${sessionId ? 'AND session_id = ?' : ''}
+        AND CASE WHEN json_valid(metadata) THEN json_extract(metadata, '$.llmTrace.traceId') END = ?
+        AND COALESCE(CASE WHEN json_valid(metadata)
+          THEN json_extract(metadata, '$.llmTrace.usageContext.sessionId') END, session_id) = session_id
+      LIMIT 2
+    `, sessionId ? [sessionId, traceId] : [traceId]);
+    if (rows.length !== 1) return null;
+    return { sessionId: rows[0].session_id, message: this.parseStoredMessage(rows[0].session_id, rows[0]) };
   }
 
   private parseStoredMessage(sessionId: string, row: CoworkMessageRow): CoworkMessage {

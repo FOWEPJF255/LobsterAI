@@ -209,6 +209,27 @@ function insertSession(
   ).run(id, title, pinned, pinOrder, agentId, now, now);
 }
 
+test('finds the persisted origin trace without choosing the latest turn or a fork copy', () => {
+  insertSession('origin');
+  insertSession('fork');
+  const traceId = 'a'.repeat(32);
+  const metadata = JSON.stringify({ llmTrace: {
+    traceId, startedAt: 1000,
+    usageContext: { sessionId: 'origin', ownerAccountKey: 'personal:user-a', serverBaseUrl: 'https://server.example' },
+  } });
+  insertMessage('original-message', 'origin', 'user', 'original', metadata, 1);
+  insertMessage('next-message', 'origin', 'user', 'next', JSON.stringify({ llmTrace: { traceId: 'b'.repeat(32), startedAt: 2000 } }), 2);
+  insertMessage('broken-message', 'origin', 'user', 'broken', '{broken', 3);
+  insertMessage('fork-copy', 'fork', 'user', 'original', metadata, 1);
+
+  expect(store.findUserMessageByTrace(traceId)).toMatchObject({ sessionId: 'origin', message: { id: 'original-message' } });
+  expect(store.findUserMessageByTrace(traceId, 'origin')?.message.id).toBe('original-message');
+  expect(store.findUserMessageByTrace(traceId, 'fork')).toBeNull();
+  expect(store.findUserMessageByTrace('invalid')).toBeNull();
+  insertMessage('ambiguous-message', 'origin', 'user', 'duplicate', metadata, 4);
+  expect(store.findUserMessageByTrace(traceId)).toBeNull();
+});
+
 /** Insert a message row directly, bypassing CoworkStore.addMessage. */
 function insertMessage(
   id: string,

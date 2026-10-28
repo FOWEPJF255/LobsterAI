@@ -6138,7 +6138,6 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
         this.buildInjectedSystemPrompt(normalizedSystemPrompt, agentId),
       ));
     }
-    sections.push(buildOpenClawLocalTimeContextPrompt());
     if (currentModel) {
       sections.push(`[Session info]\nCurrent model: ${currentModel}`);
     }
@@ -6181,6 +6180,8 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
       if (planMode) {
         sections.push(buildPlanModeOutboundReminder());
       }
+      // Sample after startup/rehydration; retries reuse this completed string.
+      sections.push(buildOpenClawLocalTimeContextPrompt());
       return sections.join('\n\n');
     }
 
@@ -6245,6 +6246,8 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     if (planMode) {
       sections.push(buildPlanModeOutboundReminder());
     }
+    // History probes may be slow. Freeze time only when the prompt is ready.
+    sections.push(buildOpenClawLocalTimeContextPrompt());
     return sections.join('\n\n');
   }
 
