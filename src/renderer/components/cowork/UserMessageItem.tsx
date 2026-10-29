@@ -9,11 +9,12 @@ import {
 } from '../../../shared/cowork/imageAttachments';
 import { expandPastedTextBlocks, extractPastedTextBlocks } from '../../../shared/cowork/pastedText';
 import type { CoworkSelectedTextSnippet } from '../../../shared/cowork/selectedText';
-import type { KitReference } from '../../../shared/kit/constants';
+import type { InstalledKitRecord, KitReference } from '../../../shared/kit/constants';
 import { copyTextToClipboard } from '../../services/clipboard';
 import { i18nService } from '../../services/i18n';
 import { useImageEditSnapshots } from '../../services/imageEditSnapshots';
 import { buildKitReferences } from '../../services/kitCapability';
+import { resolveLocalizedText, skillService } from '../../services/skill';
 import type { CoworkImageAttachment, CoworkMessage, CoworkMessageMetadata } from '../../types/cowork';
 import type { MarketplaceKit } from '../../types/kit';
 import type { Skill } from '../../types/skill';
@@ -31,8 +32,14 @@ import BrowserAnnotationAttachmentBadge from './BrowserAnnotationAttachmentBadge
 import BrowserAnnotationMessageAttachments, {
   type BrowserAnnotationAttachmentOpenPayload,
 } from './BrowserAnnotationMessageAttachments';
+import {
+  type ContextChipDetail,
+  ContextChipDetailKind,
+  ContextChipWithDetails,
+} from './ContextChipDetails';
 import { reportConversationMessageAction } from './conversationAnalytics';
 import ImagePreviewModal, { type ImagePreviewSource } from './ImagePreviewModal';
+import { resolveKitDetailSkills } from './kitDetailSkills';
 import {
   COWORK_DETAIL_CONTENT_CLASS,
   COWORK_DETAIL_GUTTER_CLASS,
@@ -40,6 +47,7 @@ import {
 } from './messageDisplayUtils';
 import { UserMessagePastedTexts } from './PastedTextCards';
 import SelectedTextSnippetBadge from './SelectedTextSnippetBadge';
+import { useKitDetailCatalog } from './useKitDetailCatalog';
 import { countUserMessageLines } from './userMessageCollapse';
 import UserMessageCollapsible from './UserMessageCollapsible';
 import UserMessageContent from './UserMessageContent';
@@ -128,66 +136,97 @@ const ReEditButton: React.FC<{
   );
 };
 
-// ── UserMessageSkillBadges ───────────────────────────────────────────────────
+// ── UserMessageCapabilityChips ───────────────────────────────────────────────
 
-const UserMessageSkillBadges: React.FC<{ skills: Skill[] }> = ({ skills }) => {
-  if (skills.length === 0) return null;
-
-  return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      {skills.map(skill => (
-        <div
-          key={skill.id}
-          className="inline-flex h-7 max-w-[240px] items-center gap-1.5 rounded-md bg-primary-muted px-2.5 text-[13px] font-normal leading-5 text-foreground"
-          title={skill.description}
-        >
-          <SkillIcon className="h-3.5 w-3.5 shrink-0 text-primary" />
-          <span className="min-w-0 truncate">
-            {skill.name}
-          </span>
-        </div>
-      ))}
-    </div>
-  );
+const buildSkillDetail = (skill: Skill): ContextChipDetail => {
+  const name = skillService.getLocalizedSkillName(skill.id, skill.name);
+  const origin = skill.isBuiltIn
+    ? i18nService.t('skillOriginBuiltIn')
+    : skill.isOfficial ? i18nService.t('official') : i18nService.t('skillOriginMine');
+  return {
+    kind: ContextChipDetailKind.Skill,
+    name,
+    identifier: name === skill.name ? undefined : skill.name,
+    iconUrl: skillService.getSkillIcon(skill.id),
+    description: skillService.getLocalizedSkillDescription(skill.id, skill.name, skill.description),
+    meta: [
+      i18nService.t('skills'),
+      origin,
+      ...(skill.version ? [`v${skill.version}`] : []),
+    ],
+  };
 };
 
-const UserMessageKitBadges: React.FC<{ kitReferences: KitReference[] }> = ({ kitReferences }) => {
-  if (kitReferences.length === 0) return null;
+interface KitDetailSources {
+  marketplaceKits: MarketplaceKit[];
+  installedKits: Record<string, InstalledKitRecord>;
+  /** Skill ids the message resolved for its kits; only attributable with a single kit. */
+  messageKitSkillIds: string[];
+  loading: boolean;
+}
 
-  return (
-    <>
-      {kitReferences.map(kitReference => {
-        const displayName = kitReference.name?.trim() || `@${kitReference.id}`;
-        return (
-          <div
-            key={kitReference.uri || kitReference.id}
-            className="inline-flex h-7 max-w-[240px] items-center gap-1.5 rounded-md bg-primary-muted px-2.5 text-[13px] font-normal leading-5 text-foreground"
-            title={kitReference.uri}
-          >
-            <SidebarKitsIcon className="h-3.5 w-3.5 shrink-0 text-primary" />
-            <span className="min-w-0 truncate">
-              {displayName}
-            </span>
-          </div>
-        );
-      })}
-    </>
-  );
+const buildKitDetail = (
+  kitReference: KitReference,
+  label: string,
+  sources: KitDetailSources,
+): ContextChipDetail => {
+  const kit = sources.marketplaceKits.find(item => item.id === kitReference.id);
+  const installedKit = sources.installedKits[kitReference.id];
+  const includedSkills = resolveKitDetailSkills({
+    marketplaceKit: kit,
+    installedKit,
+    messageSkillIds: sources.messageKitSkillIds,
+  }).map(skill => (skill.name ? resolveLocalizedText(skill.name) : skillService.getLocalizedSkillName(skill.id, skill.id)));
+  const version = kit?.version ?? installedKit?.version;
+  return {
+    kind: ContextChipDetailKind.Kit,
+    name: kit ? resolveLocalizedText(kit.name) : label,
+    iconUrl: kit?.icon,
+    description: kit ? resolveLocalizedText(kit.description) : '',
+    meta: [
+      i18nService.t('kits'),
+      ...(kit?.author ? [i18nService.t('kitOfficial')] : []),
+      ...(version ? [`v${version}`] : []),
+      ...(includedSkills.length > 0
+        ? [i18nService.t('kitSkillCount').replace('{count}', String(includedSkills.length))]
+        : []),
+    ],
+    includedSkills,
+    loading: !kit && sources.loading,
+  };
 };
 
-const UserMessageCapabilityBadges: React.FC<{
-  kitReferences: KitReference[];
-  skills: Skill[];
-}> = ({ kitReferences, skills }) => {
-  if (kitReferences.length === 0 && skills.length === 0) return null;
-
-  return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <UserMessageKitBadges kitReferences={kitReferences} />
-      <UserMessageSkillBadges skills={skills} />
-    </div>
-  );
-};
+// Same chips, order and inline placement as the composer, so a sent message
+// reads the way it was typed; clicking one shows what the skill or kit does.
+const renderCapabilityChips = (
+  skills: Skill[],
+  kitReferences: KitReference[],
+  kitSources: KitDetailSources,
+  onOpenKit: (kitId: string) => void,
+): React.ReactNode[] => [
+  ...skills.map(skill => (
+    <ContextChipWithDetails
+      key={`skill:${skill.id}`}
+      icon={SkillIcon}
+      label={skill.name}
+      detail={buildSkillDetail(skill)}
+      className="mr-1.5 align-top"
+    />
+  )),
+  ...kitReferences.map(kitReference => {
+    const label = kitReference.name?.trim() || `@${kitReference.id}`;
+    return (
+      <ContextChipWithDetails
+        key={`kit:${kitReference.uri || kitReference.id}`}
+        icon={SidebarKitsIcon}
+        label={label}
+        detail={buildKitDetail(kitReference, label, kitSources)}
+        onOpen={() => onOpenKit(kitReference.id)}
+        className="mr-1.5 align-top"
+      />
+    );
+  }),
+];
 
 // ── MessageImageThumbnail (local) ───────────────────────────────────────────
 
@@ -280,6 +319,7 @@ const UserMessageItem: React.FC<{
   const messageSkills = messageSkillIds
     .map(id => skills.find(s => s.id === id))
     .filter((s): s is NonNullable<typeof s> => s !== undefined);
+  const { installedKits, loading: kitCatalogLoading, ensureKitLoaded } = useKitDetailCatalog(marketplaceKits);
   const metadataKitReferences = Array.isArray(metadata?.kitReferences) ? metadata.kitReferences : [];
   const messageKitIds = Array.isArray(metadata?.kitIds) ? metadata.kitIds : [];
   const messageKitReferences = metadataKitReferences.length > 0
@@ -306,6 +346,17 @@ const UserMessageItem: React.FC<{
     && !imageEdits.some(snapshot => snapshot.source.filePath === image.localPath)
   );
   const hasCapabilityBadges = messageKitReferences.length > 0 || messageSkills.length > 0;
+  const capabilityChips = hasCapabilityBadges
+    ? renderCapabilityChips(messageSkills, messageKitReferences, {
+      marketplaceKits,
+      installedKits,
+      messageKitSkillIds: messageKitReferences.length === 1
+        ? metadata?.resolvedKitCapabilities?.skillIds ?? []
+        : [],
+      loading: kitCatalogLoading,
+    }, ensureKitLoaded)
+    : null;
+  const hasDisplayText = Boolean(displayContent?.trim());
   const hasPastedTexts = pastedTexts.length > 0;
   const handleImagePreviewOpen = useCallback((image: ImagePreviewSource) => {
     reportConversationMessageAction({
@@ -388,12 +439,12 @@ const UserMessageItem: React.FC<{
                     />
                   </div>
                 )}
-                {hasCapabilityBadges && (
-                  <div className={(hasPastedTexts || displayContent?.trim() || displayImageAttachments.length > 0 || fileAttachments.length > 0) ? 'mb-2' : ''}>
-                    <UserMessageCapabilityBadges
-                      kitReferences={messageKitReferences}
-                      skills={messageSkills}
-                    />
+                {hasCapabilityBadges && !hasDisplayText && (
+                  <div
+                    data-cowork-search-exclude="true"
+                    className={`text-markdown-body-compact ${(hasPastedTexts || displayImageAttachments.length > 0 || fileAttachments.length > 0) ? 'mb-2' : ''}`}
+                  >
+                    {capabilityChips}
                   </div>
                 )}
                 {hasPastedTexts && (
@@ -410,6 +461,7 @@ const UserMessageItem: React.FC<{
                         content={displayContent}
                         className="max-w-none"
                         onImageClick={handleImagePreviewOpen}
+                        leading={capabilityChips}
                       />
                     </div>
                   </UserMessageCollapsible>
