@@ -877,6 +877,23 @@ const LoginButton: React.FC<LoginButtonProps> = ({
     };
   }, [connectionState, isLoggedIn]);
 
+  // The optional campaign loads after the menu opens and must never delay it.
+  useEffect(() => {
+    setMenuPennyActivityEntryVisible(false);
+    if (!showMenu || !isLoggedIn || enterpriseAccountContext || user?.accountMode === 'enterprise') return;
+    let cancelled = false;
+    void loadSubscriptionTrialState().then(state => {
+      if (cancelled) return;
+      setMenuPennyActivityEntryVisible(isPennyActivityMenuEntryVisible(state, {
+        isLoggedIn: true,
+        isEnterprise: false,
+      }));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [authAccountScope, enterpriseAccountContext, isLoggedIn, showMenu, user?.accountMode]);
+
   const handleClick = async () => {
     if (isLoading) return;
     if (connectionState) {
@@ -904,10 +921,6 @@ const LoginButton: React.FC<LoginButtonProps> = ({
       const shouldLoadDailyCheckIn = !enterpriseAccountContext
         && selectedStartupCreditEntry.resolved
         && !selectedStartupCreditEntry.available;
-      const isEnterprise = Boolean(enterpriseAccountContext) || user?.accountMode === 'enterprise';
-      const subscriptionTrialRequest = isEnterprise
-        ? Promise.resolve(null)
-        : loadSubscriptionTrialState();
       setMenuOpening(true);
       setMenuStartupCreditEntry(selectedStartupCreditEntry);
       setMenuDailyCheckInSnapshot(null);
@@ -936,17 +949,12 @@ const LoginButton: React.FC<LoginButtonProps> = ({
           'failed to preload daily check-in before opening account menu',
         );
       } finally {
-        const subscriptionTrialState = await subscriptionTrialRequest;
         if (
           mountedRef.current
           && menuOpenRequestRef.current === requestId
           && authAccountScopeRef.current === requestAccountScope
         ) {
           setMenuDailyCheckInSnapshot(dailyCheckInSnapshot);
-          setMenuPennyActivityEntryVisible(isPennyActivityMenuEntryVisible(subscriptionTrialState, {
-            isLoggedIn: true,
-            isEnterprise,
-          }));
           setShowMenu(true);
           setMenuOpening(false);
         }
