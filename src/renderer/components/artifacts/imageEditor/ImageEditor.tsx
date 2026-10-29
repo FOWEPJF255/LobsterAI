@@ -22,6 +22,7 @@ import type { Artifact } from '../../../types/artifact';
 import { createModalEscapeLayerId, isDismissEscapeEvent, isTopModalEscapeLayer, registerModalEscapeLayer, unregisterModalEscapeLayer } from '../../common/modalEscape';
 import MessageCopiedIcon from '../../icons/MessageCopiedIcon';
 import MessageCopyIcon from '../../icons/MessageCopyIcon';
+import { getImageArtifactSrc } from '../renderers/imageArtifactSource';
 import ImageRenderer from '../renderers/ImageRenderer';
 import { buildLocalFileSrc } from '../renderers/VideoRenderer';
 import { drawImageMark, drawImageMarks, exportImageDrawing, loadEditorImage } from './imageDrawing';
@@ -177,7 +178,8 @@ export default function ImageEditor({ artifact, surface = ImageEditorSurface.Pan
       if (finished && list.success && list.data.some(version => version.requestId === finished.requestId)) dispatch(endImageEditJob(finished.requestId));
     }).catch(error => { if (alive) { setError(error.message); setInitialFailed(true); } });
     return () => { alive = false; invalidateLoads(); };
-  }, [artifact.id, artifact.content, artifact.filePath, artifact.sessionId, artifact.title, bridge, dispatch, initialOperation, initialVersionId, invalidateLoads, isStudio]);
+  // contentVersion reopens a file refreshed in the panel or changed on disk.
+  }, [artifact.id, artifact.content, artifact.contentVersion, artifact.filePath, artifact.sessionId, artifact.title, bridge, dispatch, initialOperation, initialVersionId, invalidateLoads, isStudio]);
 
   useEffect(() => {
     if (!bridge) return;
@@ -417,13 +419,13 @@ export default function ImageEditor({ artifact, surface = ImageEditorSurface.Pan
     if (stage.current?.hasPointerCapture(event.pointerId)) stage.current.releasePointerCapture(event.pointerId);
   };
   const studioClose = onClose && <ToolButton label={t('close')} icon={XMarkIcon} onClick={onClose} className="non-draggable pointer-events-auto" />;
-  const fallbackSrc = artifact.filePath ? buildLocalFileSrc(artifact.filePath, artifact.createdAt) : artifact.content;
+  const fallbackSrc = getImageArtifactSrc(artifact);
   const platform = window.electron?.platform;
   const topBarClass = `pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start gap-2 p-3 ${
     isStudio ? `draggable ${platform === 'darwin' ? 'pl-[84px]' : ''} ${platform === 'win32' ? 'pr-[150px]' : ''}` : ''}`;
   if (initialFailed) return <div className="flex h-full flex-col">
     <div className={`flex items-center gap-2 px-4 py-2 ${isStudio ? 'draggable' : ''}`}><p className="flex-1 text-xs text-muted">{error || t('imageEditUnsupported')}</p>{studioClose}</div>
-    <div className="min-h-0 flex-1"><ImageRenderer artifact={artifact.content ? artifact : { ...artifact, content: fallbackSrc }} /></div>
+    <div className="min-h-0 flex-1"><ImageRenderer artifact={artifact} /></div>
   </div>;
   // The bottom bar renders while loading too, so the placeholder is laid out around its real height, mode panel included.
   const compact = viewportSize.width < COMPACT_WIDTH;

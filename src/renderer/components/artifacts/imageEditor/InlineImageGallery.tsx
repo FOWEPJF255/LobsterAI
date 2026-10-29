@@ -13,7 +13,7 @@ import MessageCopyIcon from '../../icons/MessageCopyIcon';
 import { ArtifactPreviewActionSource, ArtifactPublishEntryPoint, reportArtifactPreviewAction } from '../artifactAnalytics';
 import { useOptionalArtifactFileShare } from '../ArtifactFileShareController';
 import { isArtifactFileShareable } from '../artifactFileSharePolicy';
-import { buildLocalFileSrc } from '../renderers/VideoRenderer';
+import { getImageArtifactSrc } from '../renderers/imageArtifactSource';
 import { PaletteBrushIcon } from './ImageEditingIcons';
 import { isImageStudioAvailable } from './imageStudioAvailability';
 
@@ -26,7 +26,7 @@ type LoadState = typeof LoadState[keyof typeof LoadState];
 const SINGLE_IMAGE_MAX_HEIGHT = 420;
 const SINGLE_IMAGE_PLACEHOLDER_SIZE = { width: 320, height: 240 };
 
-const imageSrc = (artifact: Artifact): string => artifact.filePath ? buildLocalFileSrc(artifact.filePath, artifact.createdAt) : artifact.content;
+const imageSrc = getImageArtifactSrc;
 const imageName = (artifact: Artifact): string => artifact.fileName || artifact.title || t('artifactImageAlt');
 const toast = (message: string) => window.dispatchEvent(new CustomEvent('app:showToast', { detail: message }));
 
