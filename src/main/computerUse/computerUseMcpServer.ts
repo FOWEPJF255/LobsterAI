@@ -40,12 +40,6 @@ export const ComputerUseMcpEnv = {
 export type ComputerUseMcpEnv =
   typeof ComputerUseMcpEnv[keyof typeof ComputerUseMcpEnv];
 
-/**
- * OpenClaw substitutes ${VAR} placeholders from the gateway environment when it
- * loads openclaw.json, so the per-launch bridge secret never lands on disk.
- */
-export const COMPUTER_USE_BRIDGE_SECRET_PLACEHOLDER = '${LOBSTER_MCP_BRIDGE_SECRET}';
-
 type ResolveComputerUseMcpServerOptions = {
   askUserCallbackUrl: string | null;
   electronNodePath: string;
@@ -145,7 +139,6 @@ export function resolveComputerUseMcpServer(
   const command = systemNodePath || options.electronNodePath;
   const env: Record<string, string> = {
     [ComputerUseMcpEnv.AskUserUrl]: options.askUserCallbackUrl,
-    [ComputerUseMcpEnv.BridgeSecret]: COMPUTER_USE_BRIDGE_SECRET_PLACEHOLDER,
     [ComputerUseMcpEnv.ClientModulePath]: runtimePaths.clientModulePath,
     [ComputerUseMcpEnv.ExePath]: runtimePaths.helperExePath,
     [ComputerUseMcpEnv.HelperStateHome]: ensureComputerUseHelperStateHome(),
@@ -174,6 +167,8 @@ export function resolveComputerUseMcpServer(
     command,
     args: [ensureComputerUseMcpServerScript()],
     env,
+    // Resolve the bridge secret from the gateway env without persisting its value.
+    gatewayEnvRefs: { [ComputerUseMcpEnv.BridgeSecret]: ComputerUseMcpEnv.BridgeSecret },
   };
 }
 
