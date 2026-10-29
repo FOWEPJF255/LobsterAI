@@ -140,7 +140,7 @@ function prepareDependencyCache(source, cache, arch, install) {
 }
 
 /** Keep developer node_modules out of packaging, even for a single x64 build. */
-function prepareMacSkills(context, { projectDir = path.join(__dirname, '..'), install = installDependencies } = {}) {
+function prepareMacSkills(context, { projectDir = context.packager?.projectDir ?? path.join(__dirname, '..'), install = installDependencies } = {}) {
   if (context.electronPlatformName !== MAC_PLATFORM) return;
   const arches = targetArchitectures(context);
   console.log(`[skill-dependencies] Preparing Mac skills: host=${process.platform}-${process.arch}, target=darwin-${arches.join('+')}`);
@@ -189,7 +189,7 @@ function prepareMacSkills(context, { projectDir = path.join(__dirname, '..'), in
   return payload;
 }
 
-function verifyPackagedMacSkills(context, projectDir = path.join(__dirname, '..')) {
+function verifyPackagedMacSkills(context, projectDir = context.packager?.projectDir ?? path.join(__dirname, '..')) {
   if (context.electronPlatformName !== MAC_PLATFORM) return;
   const source = path.join(projectDir, 'SKILLs');
   const resources = path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`, 'Contents', 'Resources', 'SKILLs');
