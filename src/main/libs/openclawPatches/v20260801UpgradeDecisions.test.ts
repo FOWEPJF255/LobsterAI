@@ -48,6 +48,7 @@ const RETAINED_PATCHES = [
   'openclaw-openai-compatible-cache-control.patch',
   'openclaw-openai-completions-output-budget.patch',
   'openclaw-openai-completions-tool-call-repair.patch',
+  'openclaw-openai-oauth-token-proxy.patch',
   'openclaw-plugin-archive-windows-timeout.patch',
   'openclaw-project-memory-negative-probe.patch',
   'openclaw-provider-auth-warm-cooperative-exit.patch',
@@ -183,6 +184,14 @@ describe('OpenClaw v2026.8.1 upgrade decisions', () => {
       'utf8',
     );
     expect(adapter).toContain('traceparent: createLlmTraceparent(llmTrace.traceId)');
+  });
+
+  test('routes ChatGPT OAuth token requests through the gateway proxy env', () => {
+    expectPatchContains('openclaw-openai-oauth-token-proxy.patch', [
+      '+    mode: "trusted_env_proxy",',
+      '+describe.each(["exchange", "refresh"] as const)("OpenAI token %s proxy routing", (operation) => {',
+      '+      name: "NO_PROXY bypass",',
+    ]);
   });
 
   test('uses native chat.send steering instead of the retired custom RPC', () => {
