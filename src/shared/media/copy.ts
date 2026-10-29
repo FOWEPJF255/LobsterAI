@@ -2,8 +2,8 @@ export const mediaTranslations = {
   zh: {
     mediaPreferencesUnavailable: '媒体设置暂时无法读取或保存，请稍后重试。',
     mediaSelectedModelUnavailable: '已选媒体模型当前不可用，请重新选择；不会自动换用其他计费模型。',
-    mediaDisableType: '关闭此类生成',
-    mediaRestoreDefaults: '恢复系统默认',
+    mediaDisableImage: '不生成图片',
+    mediaDisableVideo: '不生成视频',
     mediaSystemDefault: '系统默认',
     mediaExtraImageConfirmTitle: '继续生成图片？',
     mediaExtraImageConfirmDescription: '本轮已使用默认生图次数。继续生成或重试将再次消耗积分，请确认是否生成下一张。',
@@ -59,8 +59,8 @@ export const mediaTranslations = {
   en: {
     mediaPreferencesUnavailable: 'Media settings could not be read or saved. Please try again.',
     mediaSelectedModelUnavailable: 'The selected media model is unavailable. Choose another model; no paid model will be substituted automatically.',
-    mediaDisableType: 'Disable this media type',
-    mediaRestoreDefaults: 'Restore system default',
+    mediaDisableImage: 'Don\'t generate images',
+    mediaDisableVideo: 'Don\'t generate videos',
     mediaSystemDefault: 'System default',
     mediaExtraImageConfirmTitle: 'Generate another image?',
     mediaExtraImageConfirmDescription: 'This turn has used its default image allowance. Another generation or retry will spend more credits. Confirm to generate the next image.',
