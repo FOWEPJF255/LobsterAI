@@ -2772,6 +2772,106 @@ test('pollChannelSessions clears stale override when channel row matches the age
   ]);
 });
 
+const removedProviderCatalog = { qwen: { models: [{ id: 'qwen3.6-plus' }] } };
+
+test('pollChannelSessions resets an IM session pinned to a removed provider instead of mirroring it', async () => {
+  const sessionKey = 'agent:agent-1:moltbot-popo:bot-1:direct:user@example.com';
+  const { session, store } = createReconcileStore([], {
+    agentModel: 'qwen/qwen3.6-plus',
+    sessionId: 'session-1',
+  });
+  session.modelOverride = 'deepseek/deepseek-v4-flash';
+  const requests: Array<{ method: string; params: Record<string, unknown> }> = [];
+  const adapter = new OpenClawRuntimeAdapter(store, {}, { getModelCatalog: () => removedProviderCatalog });
+  adapter.gatewayClient = {
+    start: () => {},
+    stop: () => {},
+    request: async (method: string, params?: Record<string, unknown>) => {
+      requests.push({ method, params: params ?? {} });
+      if (method === 'sessions.list') {
+        return {
+          sessions: [{
+            key: sessionKey,
+            providerOverride: 'deepseek',
+            modelOverride: 'deepseek-v4-flash',
+            modelOverrideSource: 'user',
+          }],
+        };
+      }
+      return {};
+    },
+  };
+  adapter.channelSessionSync = {
+    isChannelSessionKey: (key: string) => key === sessionKey,
+    isCurrentBindingKey: () => true,
+    resolveOrCreateSession: () => session.id,
+  };
+  adapter.knownChannelSessionIds.add(session.id);
+  adapter.fullySyncedSessions.add(session.id);
+  adapter.sessionIdBySessionKey.set(sessionKey, session.id);
+  adapter.activeTurns.set(session.id, createActiveTurn(session.id, sessionKey, 'run-active'));
+
+  await adapter.pollChannelSessions();
+  await vi.waitFor(() => expect(session.modelOverride).toBe(''));
+
+  expect(requests.filter(request => request.method === 'sessions.patch').map(request => request.params))
+    .toEqual([{ key: sessionKey, model: null }]);
+  expect(session.messages).toContainEqual(expect.objectContaining({
+    type: 'system',
+    content: t('coworkSessionModelOverrideUnavailable', { model: 'deepseek/deepseek-v4-flash' }),
+  }));
+});
+
+test('channel history never mirrors a removed model into the local session', () => {
+  const sessionKey = 'agent:main:feishu:dm:ou_123';
+  const { session, store, getUpdateSessionCalls } = createReconcileStore([], {
+    agentModel: 'qwen/qwen3.6-plus',
+    sessionId: 'session-1',
+  });
+  const request = vi.fn();
+  const adapter = new OpenClawRuntimeAdapter(store, {}, { getModelCatalog: () => removedProviderCatalog });
+  adapter.gatewayClient = { start: () => {}, stop: () => {}, request };
+
+  const changed = adapter.syncChannelSessionModelOverride({
+    coworkSessionId: session.id,
+    openClawSessionKey: sessionKey,
+    state: { modelRef: 'deepseek/deepseek-v4-flash', explicitOverride: true, source: 'session-status' },
+  });
+
+  expect(changed).toBe(false);
+  expect(session.modelOverride).toBe('');
+  expect(getUpdateSessionCalls()).toEqual([]);
+  expect(request).not.toHaveBeenCalled();
+});
+
+test('reconcileStaleSessionModelOverrides resets an idle IM session before its next message', async () => {
+  const sessionKey = 'agent:agent-1:moltbot-popo:bot-1:direct:user@example.com';
+  const { session, store: baseStore } = createReconcileStore([], {
+    agentModel: 'qwen/qwen3.6-plus',
+    sessionId: 'session-1',
+  });
+  session.modelOverride = 'deepseek/deepseek-v4-flash';
+  const store = {
+    ...baseStore,
+    listChannelSessionModelOverrides: () => [{ sessionId: session.id, modelOverride: session.modelOverride, sessionKey }],
+  };
+  const requests: Array<{ method: string; params: Record<string, unknown> }> = [];
+  const adapter = new OpenClawRuntimeAdapter(store, {}, { getModelCatalog: () => removedProviderCatalog });
+  adapter.gatewayClient = {
+    start: () => {},
+    stop: () => {},
+    request: async (method: string, params?: Record<string, unknown>) => {
+      requests.push({ method, params: params ?? {} });
+      return {};
+    },
+  };
+
+  await adapter.reconcileStaleSessionModelOverrides('test');
+
+  expect(requests).toEqual([{ method: 'sessions.patch', params: { key: sessionKey, model: null } }]);
+  expect(session.modelOverride).toBe('');
+});
+
 test('pollChannelSessions marks a channel session running when sessions.list reports an active run', async () => {
   const sessionKey = 'agent:main:feishu:dm:ou_123';
   const { session, store, getUpdateSessionCalls } = createReconcileStore([], {
@@ -3447,6 +3547,7 @@ function createRunTurnAdapter(options: {
   holdChatSend?: boolean;
   stateDir?: string;
   defaultSystemPrompt?: string;
+  modelCatalog?: Record<string, { models: Array<{ id: string }> }>;
 } = {}) {
   const session = {
     id: 'session-1',
@@ -3530,7 +3631,11 @@ function createRunTurnAdapter(options: {
       clientEntryPath: '/tmp/openclaw-gateway-client.js',
     }),
   };
-  const adapter = new OpenClawRuntimeAdapter(store as never, engineManager as never);
+  const adapter = new OpenClawRuntimeAdapter(
+    store as never,
+    engineManager as never,
+    options.modelCatalog ? { getModelCatalog: () => options.modelCatalog! } : {},
+  );
   adapter.gatewayClient = {
     start: () => {},
     stop: () => {},
@@ -4413,6 +4518,50 @@ test('continueSession patches a session override before chat.send even when the 
     model,
     reasoningLevel: 'stream',
   });
+});
+
+test('continueSession falls back to the agent model when the session model was removed', async () => {
+  const { adapter, requests, session } = createRunTurnAdapter({
+    sessionModelOverride: 'deepseek/deepseek-v4-flash',
+    agentModel: 'qwen/qwen3.6-plus',
+    modelCatalog: { qwen: { models: [{ id: 'qwen3.6-plus' }] } },
+  });
+  const overrideChanges: string[] = [];
+  const notifySessionModelOverrideChanged = adapter.notifySessionModelOverrideChanged.bind(adapter);
+  adapter.notifySessionModelOverrideChanged = (sessionId: string, modelOverride: string) => {
+    overrideChanges.push(modelOverride);
+    notifySessionModelOverrideChanged(sessionId, modelOverride);
+  };
+
+  await adapter.continueSession('session-1', 'hello');
+
+  const patches = requests.filter(request => request.method === 'sessions.patch').map(request => request.params);
+  expect(patches).toEqual([
+    { key: 'agent:main:lobsterai:session-1', model: null },
+    { key: 'agent:main:lobsterai:session-1', model: 'qwen/qwen3.6-plus', reasoningLevel: 'stream' },
+  ]);
+  expect(requests.some(request => request.method === 'chat.send')).toBe(true);
+  expect(session.modelOverride).toBe('');
+  expect(overrideChanges).toEqual(['']);
+  expect(session.messages).toContainEqual(expect.objectContaining({
+    type: 'system',
+    content: t('coworkSessionModelOverrideUnavailable', { model: 'deepseek/deepseek-v4-flash' }),
+  }));
+});
+
+test('continueSession keeps a session model that is still configured', async () => {
+  const { adapter, requests, session } = createRunTurnAdapter({
+    sessionModelOverride: 'qwen/qwen3.8-max',
+    agentModel: 'qwen/qwen3.6-plus',
+    modelCatalog: { qwen: { models: [{ id: 'qwen3.6-plus' }, { id: 'qwen3.8-max' }] } },
+  });
+
+  await adapter.continueSession('session-1', 'hello');
+
+  expect(requests.filter(request => request.method === 'sessions.patch').map(request => request.params.model))
+    .toEqual(['qwen/qwen3.8-max']);
+  expect(session.modelOverride).toBe('qwen/qwen3.8-max');
+  expect(session.messages.some(message => message.type === 'system')).toBe(false);
 });
 
 const planResolvedPatchResult = {

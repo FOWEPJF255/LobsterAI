@@ -1685,6 +1685,25 @@ export class CoworkStore {
     return rows.map(row => row.id);
   }
 
+  /** IM sessions pinned to their own model, with the OpenClaw session that stores the pin. */
+  listChannelSessionModelOverrides(): Array<{ sessionId: string; modelOverride: string; sessionKey: string }> {
+    if (!this.hasIMSessionMappingsTable()) return [];
+    const rows = this.getAll<{ id: string; model_override: string; openclaw_session_key: string }>(
+      `
+      SELECT s.id, s.model_override, MAX(m.openclaw_session_key) AS openclaw_session_key
+      FROM cowork_sessions s
+      JOIN im_session_mappings m ON m.cowork_session_id = s.id
+      WHERE s.model_override != '' AND COALESCE(m.openclaw_session_key, '') != ''
+      GROUP BY s.id
+    `,
+    );
+    return rows.map(row => ({
+      sessionId: row.id,
+      modelOverride: row.model_override,
+      sessionKey: row.openclaw_session_key,
+    }));
+  }
+
   private deleteSessionRows(ids: string[]): string[] {
     if (ids.length === 0) return [];
     this.sessionProjectionNotifications.capture(ids);
