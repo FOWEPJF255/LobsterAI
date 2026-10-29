@@ -146,6 +146,8 @@ import {
   getAutoPreviewOpenTarget,
   selectAutoPreviewArtifact,
 } from '../artifacts/autoPreviewPolicy';
+import ImageStudioHost from '../artifacts/imageEditor/ImageStudioHost';
+import { preloadInlineImages } from '../artifacts/imageEditor/InlineImageGallery';
 import ComposeIcon from '../icons/ComposeIcon';
 import FileTypeIcon from '../icons/fileTypes/FileTypeIcon';
 import SidebarSearchIcon from '../icons/SidebarSearchIcon';
@@ -218,6 +220,7 @@ import {
   mergeCoworkTextExportMessages,
 } from './sessionExport';
 import SubagentSpawnCard from './SubagentSpawnCard';
+import { useConversationEntrySettle } from './useConversationEntrySettle';
 import { useCoworkConversationSearch } from './useCoworkConversationSearch';
 import { useCoworkMarkdownLinkOpener } from './useCoworkMarkdownLinkOpener';
 import { expandCollapsedUserMessage } from './userMessageCollapse';
@@ -1780,6 +1783,15 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
     setIsViewportAtSessionBottom(true);
     updateShouldAutoScroll(true);
   }, [currentSession?.id, updateShouldAutoScroll]);
+
+  const setConversationContentElement = useConversationEntrySettle({
+    sessionId: currentSession?.id,
+    scrollContainerRef,
+    canHoldBottom: () => shouldAutoScrollRef.current
+      && !isNavigatingRef.current
+      && !isExportingImageRef.current
+      && !conversationSearchViewportLockedRef.current,
+  });
 
   const handleCompactContext = useCallback(() => {
     if (!currentSession?.id) {
@@ -3828,14 +3840,20 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
       const toLoad = detected.filter(a => a.filePath && !loadedFileIdsRef.current.has(a.id));
       if (toLoad.length === 0) return;
 
+      // Load in parallel and add everything in one pass: one re-render instead of one per
+      // file, and an image gallery that appears complete and at its final size instead of
+      // growing tile by tile (which shifts the conversation while a task is being opened).
       const loadFiles = async () => {
-        for (const artifact of toLoad) {
+        const loadedArtifacts = await Promise.all(toLoad.map(async (artifact) => {
           const loaded = await loadDetectedFileArtifact(artifact, cwd);
           // Mark as loaded either way to avoid retrying missing files.
           loadedFileIdsRef.current.add(artifact.id);
-          if (loaded) {
-            dispatch(addArtifact({ sessionId, artifact: loaded }));
-          }
+          return loaded;
+        }));
+        const artifactsToAdd = loadedArtifacts.filter((artifact): artifact is Artifact => artifact !== null);
+        await preloadInlineImages(artifactsToAdd);
+        for (const artifact of artifactsToAdd) {
+          dispatch(addArtifact({ sessionId, artifact }));
         }
       };
       loadFiles();
@@ -6593,23 +6611,25 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
               onAskInSideChat={handleOpenSelectedTextInSideChat}
             />
           )}
-          {isLoadingMoreMessages && (
-            <div className="py-2 text-center text-xs dark:text-claude-darkTextSecondary text-claude-textSecondary">
-              {i18nService.t('loading')}
-            </div>
-          )}
-          {renderConversationTurns()}
-          {isContextCompacting && (
-            <div className={`${COWORK_DETAIL_GUTTER_CLASS} animate-message-in`}>
-              <div className={COWORK_DETAIL_CONTENT_CLASS}>
-                <ContextCompactionDivider
-                  label={i18nService.t('coworkContextCompacting')}
-                  active
-                />
+          <div ref={setConversationContentElement}>
+            {isLoadingMoreMessages && (
+              <div className="py-2 text-center text-xs dark:text-claude-darkTextSecondary text-claude-textSecondary">
+                {i18nService.t('loading')}
               </div>
-            </div>
-          )}
-          <div className={hasDockedQuestion ? 'h-4' : 'h-20'} />
+            )}
+            {renderConversationTurns()}
+            {isContextCompacting && (
+              <div className={`${COWORK_DETAIL_GUTTER_CLASS} animate-message-in`}>
+                <div className={COWORK_DETAIL_CONTENT_CLASS}>
+                  <ContextCompactionDivider
+                    label={i18nService.t('coworkContextCompacting')}
+                    active
+                  />
+                </div>
+              </div>
+            )}
+            <div className={hasDockedQuestion ? 'h-4' : 'h-20'} />
+          </div>
         </div>
 
         {/* Turn Navigation Rail — to the left of scrollbar */}
@@ -7154,6 +7174,7 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
     )}
       </div>
       </div>
+      <ImageStudioHost sessionId={currentSession.id} />
     </MarkdownLinkOpenerContext.Provider>
     </ArtifactFileShareProvider>
   );

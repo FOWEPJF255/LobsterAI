@@ -754,6 +754,19 @@ const v20260801StrongPatchValidators = {
       ],
     },
   ],
+  'openclaw-openai-oauth-token-proxy.patch': [
+    {
+      file: 'extensions/openai/openai-chatgpt-oauth-token.runtime.ts',
+      snippets: [
+        'mode: "trusted_env_proxy",',
+        'hostnameAllowlist: ["auth.openai.com"]',
+      ],
+    },
+    {
+      file: 'extensions/openai/openai-chatgpt-oauth-token.proxy.test.ts',
+      snippets: ['OpenAI token %s proxy routing'],
+    },
+  ],
   'openclaw-openai-compatible-cache-control.patch': [
     {
       file: 'packages/ai/src/transports/openai-completions-params.ts',

@@ -707,7 +707,7 @@ async function beforePack(context) {
   configureBetterSqlite3MacPayload(context);
   ensureBundledOpenClawRuntime(context);
   if (isMacTarget(context)) {
-    prepareMacSkills(context, { projectDir: context.packager.projectDir });
+    prepareMacSkills(context);
   } else {
     installSkillDependencies();
   }

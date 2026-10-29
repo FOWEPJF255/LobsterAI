@@ -938,6 +938,38 @@ web-fetch tests, and `src/infra/net/fetch-guard.test.ts`; then rebuild and test 
 real HTTPS tunnel with the generated desktop config. Remove when upstream
 supports an equivalent proxy transport with validated, pinned destination IPs.
 
+## ChatGPT OAuth token requests honor the gateway proxy (upstream backport)
+
+`openclaw-openai-oauth-token-proxy.patch` backports the production change from
+[OpenClaw #131161](https://github.com/openclaw/openclaw/pull/131161), merged as
+`056202190` on 2026-09-04. The OpenAI ChatGPT/Codex token exchange and refresh
+POSTs to `auth.openai.com` now use `trusted_env_proxy` mode, so they follow the
+`HTTPS_PROXY`/`HTTP_PROXY` that LobsterAI injects into the Gateway environment.
+Before this patch the guard used strict mode: local DNS pinning and a direct
+connection, ignoring the proxy. Users in regions OpenAI does not serve saw a
+working desktop login (the Electron code exchange uses Chromium's proxy) followed
+by `OpenAI Codex token refresh failed (403): unsupported_country_region_territory`
+once the access token expired.
+
+The exact-host `auth.openai.com` allowlist, fake-IP ranges, NO_PROXY bypass,
+direct DNS pinning when no proxy applies, the managed proxy, abort handling and
+the response size limit are unchanged. ALL_PROXY alone still does not select a
+proxy, matching undici's EnvHttpProxyAgent.
+
+The upstream proxy test is adapted to the v2026.8.1 token result shape
+(`{ type, message }`); the newer `assertCurrent` owner check and its "retired
+owner" case do not exist in this version. The upstream callback-test DNS family
+tweak in `openai-chatgpt-oauth-flow.runtime.test.ts` is unrelated to the fix and
+is not backported.
+
+Verify `extensions/openai/openai-chatgpt-oauth-token.proxy.test.ts` and
+`openai-chatgpt-oauth-flow.runtime.test.ts`. Without the production line, the
+HTTPS_PROXY and HTTP_PROXY cases fail for both exchange and refresh. Rebuild the
+runtime; the bundled `dist/extensions/openai` output must contain the new mode.
+
+Removal: upstream v2026.9.2 and later contain this commit (v2026.8.1 does not).
+On an upgrade that contains it, remove this patch and rerun the proxy test.
+
 ## Tool payloads keep their text in transcripts (upstream backport)
 
 `openclaw-tool-payload-transcript-fidelity.patch` backports the agents half of
