@@ -14,6 +14,7 @@ import { WeixinPlugin } from '../../shared/im/weixin';
 import { MediaConfirmationPolicy } from '../../shared/media/confirmation';
 import { OpenClawSkillReviewMode } from '../../shared/openclawEngine/constants';
 import { OpenClawProviderId, ProviderName } from '../../shared/providers';
+import { ComputerUseMcpEnv, ComputerUseMcpServerName } from '../computerUse/computerUseMcpServer';
 import { DEFAULT_DISCORD_OPENCLAW_CONFIG, DEFAULT_QQ_CONFIG, DiscordDmPolicy } from '../im/types';
 import { OpenClawAgentOwnership } from './openclawAgentModels';
 import { CHROME_DISK_CACHE_SIZE_ARG, OPENCLAW_MEMORY_CORE_PLUGIN_ID } from './openclawConfigSync';
@@ -4683,22 +4684,60 @@ describe('OpenClawConfigSync runtime config output', () => {
     expect(config.mcp.servers['header-remote'].headers).toEqual({ authorization: 'Bearer kept' });
   });
 
-  test('escapes ${VAR} in user MCP values so OpenClaw never fills them from the gateway env', async () => {
+  test('repairs an escaped internal MCP secret reference while keeping other values literal', async () => {
+    const serverName = ComputerUseMcpServerName.BuiltIn;
+    const secretKey = ComputerUseMcpEnv.BridgeSecret;
+    fs.writeFileSync(configPath, JSON.stringify({
+      mcp: { servers: { [serverName]: { env: { [secretKey]: '$${LOBSTER_MCP_BRIDGE_SECRET}' } } } },
+    }));
+    const sync = await createSync({
+      getMcpBridgeSecret: () => 'fixture-bridge-secret',
+      getResolvedMcpServers: () => [{
+        name: serverName,
+        transportType: 'stdio',
+        command: 'node',
+        env: { [ComputerUseMcpEnv.SelfAppName]: '${LOBSTER_PROXY_TOKEN}' },
+        gatewayEnvRefs: { [secretKey]: secretKey },
+      }],
+    });
+
+    expect(sync.sync('computer-use-auth-repair')).toMatchObject({ ok: true, changed: true });
+    const raw = fs.readFileSync(configPath, 'utf8');
+    const entry = JSON.parse(raw).mcp.servers[serverName];
+    expect(entry.env).toEqual({
+      [secretKey]: '${LOBSTER_MCP_BRIDGE_SECRET}',
+      [ComputerUseMcpEnv.SelfAppName]: '$${LOBSTER_PROXY_TOKEN}',
+    });
+    expect(entry).not.toHaveProperty('gatewayEnvRefs');
+    expect(raw).not.toContain('fixture-bridge-secret');
+    expect(sync.collectSecretEnvVars()[secretKey]).toBe('fixture-bridge-secret');
+    expect(sync.sync('computer-use-auth-repair')).toMatchObject({ ok: true, changed: false });
+  });
+
+  test.each(['http', 'sse'] as const)('escapes external %s and stdio MCP values without expanding gateway secrets', async (transportType) => {
     const sync = await createSync({
       getResolvedMcpServers: () => [
         {
           name: 'remote-literal',
-          transportType: 'http',
+          transportType,
           url: 'https://mcp.example.com/mcp?key=${LOBSTER_APIKEY_SERVER}',
           headers: { Authorization: 'Bearer ${OPENCLAW_GATEWAY_TOKEN}', 'X-Plain': 'plain ${lower} $5' },
         },
         {
           name: 'stdio-literal',
           transportType: 'stdio',
-          command: 'node',
+          command: '/${NODE_DIR}/node',
           args: ['server.js', '--token=${LOBSTER_PROXY_TOKEN}'],
+          cwd: '/${WORKSPACE}/mcp',
           env: { API_KEY: '${LOBSTER_MCP_BRIDGE_SECRET}', ALREADY: '$${KEEP}' },
           toolFilter: { exclude: ['${WEIRD_TOOL}'] },
+        },
+        {
+          // Matching the built-in name and env key must not confer trust.
+          name: ComputerUseMcpServerName.BuiltIn,
+          transportType: 'stdio',
+          command: 'node',
+          env: { [ComputerUseMcpEnv.BridgeSecret]: '${LOBSTER_MCP_BRIDGE_SECRET}' },
         },
       ],
     });
@@ -4714,9 +4753,14 @@ describe('OpenClawConfigSync runtime config output', () => {
       },
     });
     expect(config.mcp.servers['stdio-literal']).toMatchObject({
+      command: '/$${NODE_DIR}/node',
       args: ['server.js', '--token=$${LOBSTER_PROXY_TOKEN}'],
+      cwd: '/$${WORKSPACE}/mcp',
       env: { API_KEY: '$${LOBSTER_MCP_BRIDGE_SECRET}', ALREADY: '$$${KEEP}' },
       toolFilter: { exclude: ['$${WEIRD_TOOL}'] },
+    });
+    expect(config.mcp.servers[ComputerUseMcpServerName.BuiltIn].env).toEqual({
+      [ComputerUseMcpEnv.BridgeSecret]: '$${LOBSTER_MCP_BRIDGE_SECRET}',
     });
     // No unescaped placeholder from user data survives in the MCP section.
     expect(JSON.stringify(config.mcp)).not.toMatch(/(^|[^$])\$\{[A-Z_][A-Z0-9_]*\}/);
