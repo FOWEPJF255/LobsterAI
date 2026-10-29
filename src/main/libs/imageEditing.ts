@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { nativeImage } from 'electron';
+import { type NativeImage, nativeImage } from 'electron';
 
 import { imageGenerationSize, validImageSize } from '../../shared/imageEditing/geometry';
 import { imageEditMessageSnapshot } from '../../shared/imageEditing/messageSnapshot';
@@ -12,6 +12,7 @@ import {
   IMAGE_EDIT_MAX_BYTES,
   IMAGE_EDIT_MAX_REGIONS,
   IMAGE_EDIT_RATIOS,
+  type ImageEditCrop,
   type ImageEditMessageSnapshot,
   ImageEditOperation,
   type ImageEditRequest,
@@ -20,6 +21,7 @@ import {
   type ImageVersion,
 } from '../../shared/imageEditing/types';
 import { t } from '../i18n';
+import { blendErasePatch, eraseCropRect, imageMaskBounds } from './imageEditingErase';
 import { imageEditingHeader } from './imageEditingHeader';
 import { applyForegroundMatte } from './imageEditingMatte';
 import type { PersistedGeneratedImageAsset } from './mediaAssetPersistence';
@@ -59,6 +61,11 @@ function inspect(bytes: Buffer) {
   const { width, height } = image.getSize();
   if (image.isEmpty() || !validImageSize(width, height)) throw new Error(t('imageEditTooLarge'));
   return { ...header, image, width, height };
+}
+
+/** These edits download the raw model output privately and publish only the result composed from the source. */
+export function composesImageEditLocally(operation?: ImageEditOperation): boolean {
+  return operation === ImageEditOperation.RemoveBackground || operation === ImageEditOperation.Erase;
 }
 
 /** Stores immutable originals, private guide images, and durable version lineage. */
@@ -154,12 +161,23 @@ export class ImageEditingService {
     const sourceInfo = inspect(sourceBytes);
     const sourceSnapshot = await this.privateFile(input.sessionId, `${id}-source.${sourceInfo.extension}`, sourceBytes);
     let guidePath: string | undefined;
+    let eraseCrop: ImageEditCrop | undefined;
     if (input.operation === ImageEditOperation.Markup || input.operation === ImageEditOperation.Erase) {
       const info = inspect(imageBytes(input.guideDataUrl ?? ''));
       if (info.width !== source.width || info.height !== source.height) throw new Error(t('imageEditInvalidSize'));
+      const bounds = input.operation === ImageEditOperation.Erase ? imageMaskBounds(info.image.toBitmap(), info.width) : undefined;
+      if (input.operation === ImageEditOperation.Erase && !bounds) throw new Error(t('imageEditFailed'));
       guidePath = await this.privateFile(input.sessionId, `${id}-guide.png`, info.image.toPNG());
+      if (bounds) {
+        // Small marks get lost in a full-size image; the model receives a close-up instead.
+        const rect = eraseCropRect(bounds, info);
+        const full = rect.width === info.width && rect.height === info.height;
+        eraseCrop = { ...rect,
+          sourcePath: full ? sourceSnapshot : await this.privateFile(input.sessionId, `${id}-erase-source.png`, sourceInfo.image.crop(rect).toPNG()),
+          maskPath: full ? guidePath : await this.privateFile(input.sessionId, `${id}-erase-mask.png`, info.image.crop(rect).toPNG()) };
+      }
     }
-    const request: ImageEditRequest = { id, source: { ...source, filePath: sourceSnapshot, originalPath: source.originalPath ?? source.filePath }, operation: input.operation, regions, guidePath,
+    const request: ImageEditRequest = { id, source: { ...source, filePath: sourceSnapshot, originalPath: source.originalPath ?? source.filePath }, operation: input.operation, regions, guidePath, eraseCrop,
       sourceVersionNumber: this.list({ sessionId: input.sessionId, rootId: source.rootId }).findIndex(v => v.id === source.id) + 1,
       aspectRatio: input.aspectRatio, instruction: input.instruction?.slice(0, 4000), createdAt: Date.now() };
     imageEditPrompt(request); // Reject local-only/unknown operations before recording a request.
@@ -233,37 +251,58 @@ export class ImageEditingService {
     const maxImages = (spec?.images as { maxItems?: number } | undefined)?.maxItems ?? 0;
     const required = request.guidePath ? 2 : 1;
     if (maxImages < required || !/编辑|edit/i.test(model.capabilities ?? '')) throw new Error(t('imageEditModelUnsupported'));
-    return { prompt: imageEditPrompt(request) + (additionalPrompt && request.operation !== ImageEditOperation.RemoveBackground
+    // The matte and mask already say exactly what to change; the conversation model's own
+    // description of the image can only contradict them.
+    const fixedPrompt = request.operation === ImageEditOperation.RemoveBackground || request.operation === ImageEditOperation.Erase;
+    const crop = request.operation === ImageEditOperation.Erase ? request.eraseCrop : undefined;
+    return { prompt: imageEditPrompt(request) + (additionalPrompt && !fixedPrompt
       ? `\nAdditional instructions: ${additionalPrompt}` : ''), params: {
-      images: [request.source.filePath, ...(request.guidePath ? [request.guidePath] : [])],
-      n: 1, size: imageGenerationSize(request.source.width, request.source.height, request.aspectRatio),
+      images: crop ? [crop.sourcePath, crop.maskPath] : [request.source.filePath, ...(request.guidePath ? [request.guidePath] : [])],
+      n: 1, size: crop ? imageGenerationSize(crop.width, crop.height) : imageGenerationSize(request.source.width, request.source.height, request.aspectRatio),
       ...(request.aspectRatio ? { aspectRatio: request.aspectRatio } : {}), output_format: 'png', watermark: false,
     } };
   }
 
+  /** Applies a raw model output to the immutable source: a matte becomes a cutout, an erase close-up is blended back. */
+  private async compose(request: ImageEditRequest, output: NativeImage, original: ReturnType<typeof inspect>): Promise<NativeImage> {
+    const size = { width: original.width, height: original.height };
+    let bytes: Uint8Array;
+    if (request.operation === ImageEditOperation.RemoveBackground) {
+      const matte = output.resize({ ...size, quality: 'best' });
+      try { bytes = applyForegroundMatte(original.image.toBitmap(), matte.toBitmap(), original.width); }
+      catch { throw new ImageEditResultError(t('imageEditMaskInvalid')); }
+    } else {
+      if (!request.guidePath) throw new ImageEditResultError(t('imageEditFailed'));
+      const mask = inspect(await fs.readFile(request.guidePath));
+      // Requests staged before close-ups existed sent the full image.
+      const crop = request.eraseCrop ?? { x: 0, y: 0, ...size };
+      const patch = output.resize({ width: crop.width, height: crop.height, quality: 'best' });
+      try { bytes = blendErasePatch(original.image.toBitmap(), mask.image.toBitmap(), patch.toBitmap(), original.width, crop); }
+      catch { throw new ImageEditResultError(t('imageEditFailed')); }
+    }
+    return nativeImage.createFromBitmap(Buffer.from(bytes), size);
+  }
+
   async finalize(request: ImageEditRequest, taskId: string, assets: PersistedGeneratedImageAsset[]) {
     const finalized: PersistedGeneratedImageAsset[] = [];
+    const composed = composesImageEditLocally(request.operation);
     const resultAsset = (asset: PersistedGeneratedImageAsset, filePath: string): PersistedGeneratedImageAsset => ({
       ...asset, filePath, localPath: filePath, filename: path.basename(filePath),
-      ...(request.operation === ImageEditOperation.RemoveBackground
-        ? { url: pathToFileURL(filePath).href, originalUrl: pathToFileURL(filePath).href, mimeType: 'image/png' } : {}),
+      ...(composed ? { url: pathToFileURL(filePath).href, originalUrl: pathToFileURL(filePath).href, mimeType: 'image/png' } : {}),
     });
     for (const [index, asset] of assets.entries()) {
       const existing = this.session(request.source.sessionId).versions.find(v => v.requestId === request.id && v.taskId === taskId && v.outputIndex === index);
       if (existing) { finalized.push(resultAsset(asset, existing.filePath)); continue; }
       let filePath = asset.filePath;
       let info = inspect(await fs.readFile(filePath));
-      if (request.operation === ImageEditOperation.RemoveBackground) {
+      if (composed) {
         const original = inspect(await fs.readFile(request.source.filePath));
-        const matte = info.image.resize({ width: original.width, height: original.height, quality: 'best' });
-        let bytes: Uint8Array;
-        try { bytes = applyForegroundMatte(original.image.toBitmap(), matte.toBitmap(), original.width); }
-        catch { throw new ImageEditResultError(t('imageEditMaskInvalid')); }
-        const cutout = nativeImage.createFromBitmap(Buffer.from(bytes), { width: original.width, height: original.height });
-        filePath = path.join(this.deps.getCwd(request.source.sessionId)!, `image-cutout-${request.id}-${index}.png`);
-        try { await fs.writeFile(filePath, cutout.toPNG(), { flag: 'wx' }); }
+        const image = await this.compose(request, info.image, original);
+        const kind = request.operation === ImageEditOperation.RemoveBackground ? 'cutout' : 'erase';
+        filePath = path.join(this.deps.getCwd(request.source.sessionId)!, `image-${kind}-${request.id}-${index}.png`);
+        try { await fs.writeFile(filePath, image.toPNG(), { flag: 'wx' }); }
         catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
-        info = { ...original, image: cutout };
+        info = { ...original, image };
       }
       const version = this.record({ id: crypto.randomUUID(), rootId: request.source.rootId, parentId: request.source.id,
         sessionId: request.source.sessionId, filePath, title: path.basename(filePath), width: info.width, height: info.height,

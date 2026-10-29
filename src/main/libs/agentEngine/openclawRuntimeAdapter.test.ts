@@ -4138,7 +4138,8 @@ test('an erase turn explains the prepared mask and preserves long source paths f
   expect(chatSend?.params.message).toContain(imageEdit.guidePath);
   expect(chatSend?.params.message).toContain('2048 x 1024 removal mask');
   expect(chatSend?.params.message).toContain('WHITE marks the removal area; BLACK marks the area to preserve');
-  expect(chatSend?.params.message).toContain('source FIRST and this mask SECOND');
+  expect(chatSend?.params.message).toContain('sends a close-up of the marked area with this mask');
+  expect(chatSend?.params.message).toContain('do not describe or guess the marked object');
   expect(session.messages.find(message => message.type === 'user')?.metadata).toMatchObject({
     imageEdits: [{ requestId: 'erase-1', sourceVersionNumber: 15, operation: ImageEditOperation.Erase }],
   });

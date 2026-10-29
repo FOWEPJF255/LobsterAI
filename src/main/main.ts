@@ -161,7 +161,7 @@ import {
   type HtmlShareStatus as HtmlShareStatusValue,
 } from '../shared/htmlShare/constants';
 import { imageEditMessageMetadata } from '../shared/imageEditing/messageSnapshot';
-import { ImageEditingIpc, ImageEditOperation, type ImageEditRequest } from '../shared/imageEditing/types';
+import { ImageEditingIpc, type ImageEditRequest } from '../shared/imageEditing/types';
 import type {
   InstalledKitRecord,
   KitReference,
@@ -453,7 +453,7 @@ import {
   buildArtifactIdentityClientSourceKey,
   buildHtmlShareClientSourceKey,
 } from './libs/htmlShare/htmlShareSourceKey';
-import { ImageEditingService, ImageEditResultError } from './libs/imageEditing';
+import { composesImageEditLocally, ImageEditingService, ImageEditResultError } from './libs/imageEditing';
 import { getKeyfromAttribution, initializeKeyfromAttribution } from './libs/keyfromAttribution';
 import { LibraryThumbnailRenderer } from './libs/libraryThumbnailRenderer';
 import { LibraryThumbnailService } from './libs/libraryThumbnailService';
@@ -6780,7 +6780,7 @@ if (!gotTheLock) {
         }));
 
         let resultLines: string[];
-        let detailsAssets: unknown[] = statusImageEdit?.operation === ImageEditOperation.RemoveBackground ? [] : assets;
+        let detailsAssets: unknown[] = composesImageEditLocally(statusImageEdit?.operation) ? [] : assets;
         let savedCount = 0;
         if (status === 'succeeded' && statusMediaType === 'image' && sessionId) {
           const persistResult = await persistGeneratedImages(sessionId, assets, statusImageEdit, String(task.taskId));
@@ -6793,7 +6793,7 @@ if (!gotTheLock) {
               `  - [${asset.filename}](${pathToFileURL(asset.filePath).toString()})`
             );
           } else {
-            resultLines = statusImageEdit?.operation === ImageEditOperation.RemoveBackground ? []
+            resultLines = composesImageEditLocally(statusImageEdit?.operation) ? []
               : resultUrls.map((url, index) => `  - ![Generated image ${index + 1}](${url})`);
           }
         } else if (status === 'succeeded' && statusMediaType === 'video' && sessionId) {
@@ -7153,8 +7153,16 @@ if (!gotTheLock) {
           modelSelectionReason: happyHorse11Selection.reason,
           inputImageCount: happyHorse11Selection.imageCount,
         } : {}),
-        promptLength: prompt.length,
-        promptPreview: prompt.slice(0, 120),
+        // Log what is actually sent: image edits replace or extend the tool prompt.
+        promptLength: generateReq.prompt.length,
+        promptPreview: generateReq.prompt.slice(0, 120),
+        ...(imageEdit ? {
+          imageEdit: {
+            operation: imageEdit.operation,
+            toolPromptLength: prompt.length,
+            ...(imageEdit.eraseCrop ? { crop: [imageEdit.eraseCrop.x, imageEdit.eraseCrop.y, imageEdit.eraseCrop.width, imageEdit.eraseCrop.height] } : {}),
+          },
+        } : {}),
         params: summarizeMediaGenerationParamsForLog(params),
       }));
       if (!isRequestAccountCurrent()) return staleAccountResult();
@@ -7290,7 +7298,7 @@ if (!gotTheLock) {
         mimeType: resolveGeneratedMediaAssetMimeType(mediaType, url),
         ...(args.filename ? { filename: args.filename as string } : {}),
       }));
-      let detailsAssets: unknown[] = imageEdit?.operation === ImageEditOperation.RemoveBackground ? [] : assets;
+      let detailsAssets: unknown[] = composesImageEditLocally(imageEdit?.operation) ? [] : assets;
 
       const billing: Record<string, unknown> = {};
       if (task.quotaRemaining != null) billing.quotaRemaining = task.quotaRemaining;
@@ -7321,7 +7329,7 @@ if (!gotTheLock) {
             `  - [${asset.filename}](${pathToFileURL(asset.filePath).toString()})`
           );
           lines.push(`Results:\n${fileLines.join('\n')}`);
-        } else if (assets.length > 0 && imageEdit?.operation !== ImageEditOperation.RemoveBackground) {
+        } else if (assets.length > 0 && !composesImageEditLocally(imageEdit?.operation)) {
           const resultLines = resultUrls.map((url, index) => `  - ![Generated image ${index + 1}](${url})`);
           lines.push(`Results:\n${resultLines.join('\n')}`);
         }
@@ -7587,7 +7595,7 @@ if (!gotTheLock) {
             tracker.savedAssets = saved?.saved ?? tracker.savedAssets;
             const ready = status !== MediaTaskStatus.Succeeded || (assets.length > 0 && saved?.saved.length === assets.length);
             const details = { ...task, clientStartedAt: tracker.startedAt, taskId, mediaType: tracker.mediaType,
-              ...(tracker.imageEdit?.operation === ImageEditOperation.RemoveBackground ? { resultUrls: saved?.saved.map(asset => asset.url) ?? [] } : {}),
+              ...(composesImageEditLocally(tracker.imageEdit?.operation) ? { resultUrls: saved?.saved.map(asset => asset.url) ?? [] } : {}),
               ...(status === MediaTaskStatus.Succeeded ? {
                 deliveryStatus: ready ? MediaDeliveryStatus.Saved : MediaDeliveryStatus.Retrying,
                 assets: tracker.savedAssets ?? [],
@@ -7912,7 +7920,7 @@ if (!gotTheLock) {
 
     try {
       const result = await persistGeneratedImageAssets({
-        cwd: edit?.operation === ImageEditOperation.RemoveBackground ? await imageEditing.downloadDirectory(edit) : cwd,
+        cwd: edit && composesImageEditLocally(edit.operation) ? await imageEditing.downloadDirectory(edit) : cwd,
         assets: pendingAssets,
         fetchAsset: url => session.defaultSession.fetch(url, { signal: AbortSignal.timeout(120_000) }),
       });
