@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import { nativeImage } from 'electron';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { imageEditMessageMetadata } from '../../shared/imageEditing/messageSnapshot';
@@ -95,8 +96,8 @@ describe('immutable image versions and edit staging', () => {
       sourceVersionNumber: 2, source: { width: 320, height: 240 },
       regions: [{ x: 0.2, text: 'Add a dog' }],
     });
-    expect((await restored.readSnapshot({ sessionId: 'session', requestId: request.id })).dataUrl)
-      .toBe(`data:image/png;base64,${fixture(320, 240).toString('base64')}`);
+    expect((await restored.readSnapshot({ sessionId: 'session', requestId: request.id })).image)
+      .toEqual({ bytes: fixture(320, 240), mime: 'image/png' });
     await expect(restored.readSnapshot({ sessionId: 'other', requestId: request.id })).rejects.toThrow();
   });
   test('historical messages recover only the request with their exact frozen attachment path', async () => {
@@ -146,11 +147,11 @@ describe('immutable image versions and edit staging', () => {
     const snapshot = service().history({ sessionId: 'session', messageId: 'erase' })[0];
     expect(snapshot.requestId).toBe(request.id);
     const full = await service().readSnapshot({ sessionId: 'session', requestId: snapshot.requestId });
-    expect(full.maskDataUrl).toBe(maskDataUrl);
-    expect(full.dataUrl).toBe(`data:image/png;base64,${fixture().toString('base64')}`);
+    expect(full.mask).toEqual({ bytes: mask, mime: 'image/png' });
+    expect(full.image).toEqual({ bytes: fixture(), mime: 'image/png' });
     const preview = await service().readSnapshot({ sessionId: 'session', requestId: snapshot.requestId, preview: true });
-    for (const value of [preview.dataUrl, preview.maskDataUrl!]) {
-      const bytes = Buffer.from(value.split(',')[1], 'base64');
+    for (const value of [preview.image, preview.mask!]) {
+      const bytes = Buffer.from(value.bytes);
       expect([bytes.readUInt32BE(16), bytes.readUInt32BE(20)]).toEqual([512, 384]);
     }
     await expect(edit.readSnapshot({ sessionId: 'other', requestId: request.id })).rejects.toThrow();
@@ -174,13 +175,17 @@ describe('immutable image versions and edit staging', () => {
       guideDataUrl: `data:image/png;base64,${fixture().toString('base64')}`, instruction: 'Later edit' });
     const snapshot = service().history({ sessionId: 'session', messageId: 'markup' })[0];
     expect(snapshot).toMatchObject({ requestId: request.id, operation: ImageEditOperation.Markup, instruction: 'Add a Christmas tree here' });
+    // Full-size reads stay off the native codec; decoding and re-encoding large PNGs stalls the main process.
+    const decode = vi.spyOn(nativeImage, 'createFromBuffer');
     const full = await service().readSnapshot({ sessionId: 'session', requestId: snapshot.requestId });
-    expect(full).toEqual({ dataUrl: `data:image/png;base64,${fixture().toString('base64')}`, markupDataUrl: guideDataUrl });
+    expect(decode).not.toHaveBeenCalled();
+    decode.mockRestore();
+    expect(full).toEqual({ image: { bytes: fixture(), mime: 'image/png' }, markup: { bytes: guide, mime: 'image/png' } });
     const preview = await service().readSnapshot({ sessionId: 'session', requestId: snapshot.requestId, preview: true });
-    const bytes = Buffer.from(preview.markupDataUrl!.split(',')[1], 'base64');
+    const bytes = Buffer.from(preview.markup!.bytes);
     expect([bytes.readUInt32BE(16), bytes.readUInt32BE(20)]).toEqual([512, 384]);
     expect(bytes[bytes.length - 1]).toBe(2);
-    expect(preview.maskDataUrl).toBeUndefined();
+    expect(preview.mask).toBeUndefined();
   });
   test.each([ImageEditOperation.Erase, ImageEditOperation.Markup])('missing or mismatched historical %s guides explicitly fall back to the original', async operation => {
     const edit = service();
@@ -191,11 +196,11 @@ describe('immutable image versions and edit staging', () => {
     try {
       await fs.writeFile(request.guidePath!, fixture(400, 400));
       expect(await edit.readSnapshot({ sessionId: 'session', requestId: request.id })).toEqual({
-        dataUrl: `data:image/png;base64,${fixture().toString('base64')}`,
+        image: { bytes: fixture(), mime: 'image/png' },
       });
       await fs.unlink(request.guidePath!);
       expect(await edit.readSnapshot({ sessionId: 'session', requestId: request.id })).toEqual({
-        dataUrl: `data:image/png;base64,${fixture().toString('base64')}`,
+        image: { bytes: fixture(), mime: 'image/png' },
       });
       expect(warn).toHaveBeenCalledTimes(2);
     } finally { warn.mockRestore(); }

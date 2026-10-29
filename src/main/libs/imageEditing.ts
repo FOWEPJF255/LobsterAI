@@ -45,11 +45,16 @@ function imageBytes(dataUrl: string): Buffer {
   return Buffer.from(match[2], 'base64');
 }
 
-function inspect(bytes: Buffer) {
+function inspectHeader(bytes: Buffer) {
   if (bytes.length > IMAGE_EDIT_MAX_BYTES) throw new Error(t('imageEditTooLarge'));
   let header: ReturnType<typeof imageEditingHeader>;
   try { header = imageEditingHeader(bytes); } catch { throw new Error(t('imageEditUnsupported')); }
   if (!validImageSize(header.width, header.height)) throw new Error(t('imageEditTooLarge'));
+  return header;
+}
+
+function inspect(bytes: Buffer) {
+  const header = inspectHeader(bytes);
   const image = nativeImage.createFromBuffer(bytes);
   const { width, height } = image.getSize();
   if (image.isEmpty() || !validImageSize(width, height)) throw new Error(t('imageEditTooLarge'));
@@ -191,17 +196,24 @@ export class ImageEditingService {
 
   async readSnapshot(input: { sessionId: string; requestId: string; preview?: boolean }): Promise<ImageEditSnapshotImages> {
     const request = this.resolve(input.sessionId, input.requestId);
-    const info = inspect(await fs.readFile(request.source.filePath));
-    const scale = input.preview ? Math.min(1, 512 / Math.max(info.width, info.height)) : 1;
-    const size = { width: Math.max(1, Math.round(info.width * scale)), height: Math.max(1, Math.round(info.height * scale)) };
-    const dataUrl = (image: Electron.NativeImage) => `data:image/png;base64,${(scale < 1 ? image.resize(size) : image).toPNG().toString('base64')}`;
-    const images: ImageEditSnapshotImages = { dataUrl: dataUrl(info.image) };
+    // Only downscaled previews need decoding. Full-size views send the stored bytes as-is: re-encoding a
+    // multi-megapixel PNG with nativeImage blocks the main process for hundreds of milliseconds per image.
+    const read = async (filePath: string) => {
+      const bytes = await fs.readFile(filePath);
+      const { width, height, mime } = inspectHeader(bytes);
+      const scale = input.preview ? Math.min(1, 512 / Math.max(width, height)) : 1;
+      if (scale === 1) return { width, height, file: { bytes, mime } };
+      const size = { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) };
+      return { width, height, file: { bytes: inspect(bytes).image.resize(size).toPNG(), mime: 'image/png' } };
+    };
+    const source = await read(request.source.filePath);
+    const images: ImageEditSnapshotImages = { image: source.file };
     if ((request.operation === ImageEditOperation.Erase || request.operation === ImageEditOperation.Markup) && request.guidePath) {
       try {
-        const guide = inspect(await fs.readFile(request.guidePath));
-        if (guide.width !== info.width || guide.height !== info.height) throw new Error('Snapshot guide dimensions do not match its source');
-        if (request.operation === ImageEditOperation.Erase) images.maskDataUrl = dataUrl(guide.image);
-        else images.markupDataUrl = dataUrl(guide.image);
+        const guide = await read(request.guidePath);
+        if (guide.width !== source.width || guide.height !== source.height) throw new Error('Snapshot guide dimensions do not match its source');
+        if (request.operation === ImageEditOperation.Erase) images.mask = guide.file;
+        else images.markup = guide.file;
       } catch (error) {
         // Keep the source viewable, with an explicit UI indication that the submitted guide is missing.
         console.warn('[ImageEditing] Snapshot guide unavailable', error);

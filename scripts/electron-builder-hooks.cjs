@@ -775,7 +775,7 @@ async function beforePack(context) {
 
 async function afterPack(context) {
   if (isMacTarget(context)) {
-    verifyPackagedMacSkills(context);
+    verifyPackagedMacSkills(context, context.packager.projectDir);
   }
 
   if (isWindowsTarget(context)) {
