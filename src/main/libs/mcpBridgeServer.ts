@@ -9,7 +9,9 @@
 import crypto from 'crypto';
 import http from 'http';
 
-import type { MediaConfirmationCommand, MediaConfirmationResponse, MediaConfirmationState } from '../../shared/media/confirmation';
+import type {
+  MediaConfirmationCommand, MediaConfirmationResponse, MediaConfirmationState, VideoConfirmationDetails,
+} from '../../shared/media/confirmation';
 import { MediaConfirmationReason } from '../../shared/media/confirmation';
 import { listenOnLoopback } from './loopbackListen';
 import { MediaConfirmationRequests, type RecoverableMediaConfirmation } from './mediaConfirmationRequests';
@@ -40,6 +42,8 @@ export type AskUserRequest = {
     subtitle?: string;
     options: Array<{ label: string; description?: string }>;
     multiSelect?: boolean;
+    /** Video generation confirmations: what the desktop card lays out. */
+    video?: VideoConfirmationDetails;
   }>;
 };
 

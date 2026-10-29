@@ -63,6 +63,7 @@ function fixture() {
     electronPlatformName: 'darwin',
     appOutDir: path.join(root, 'release', arch),
     packager: {
+      projectDir: root,
       platform: 'mac',
       info: { options: { targets: new Map([['mac', new Map(universal ? [[Arch.universal, []]] : [])]]) } },
       appInfo: { productFilename: 'LobsterAI' },
@@ -85,7 +86,7 @@ describe('Mac skill dependency packaging', () => {
     const f = fixture();
     for (const arch of [first, second, first, second]) {
       const context = f.context(arch);
-      const payload = prepareMacSkills(context, { projectDir: f.root, install: f.install });
+      const payload = prepareMacSkills(context, { install: f.install });
       if (process.platform !== 'win32') {
         expect(fs.readlinkSync(path.join(payload, 'pptx/node_modules/.bin/fixture'))).toBe('../sharp/package.json');
       }
@@ -132,7 +133,7 @@ describe('Mac skill dependency packaging', () => {
     const resources = path.join(context.appOutDir, 'LobsterAI.app/Contents/Resources/SKILLs');
     fs.mkdirSync(path.dirname(resources), { recursive: true });
     fs.cpSync(payload, resources, { recursive: true });
-    expect(() => verifyPackagedMacSkills(context, f.root)).not.toThrow();
+    expect(() => verifyPackagedMacSkills(context)).not.toThrow();
     const skill = path.join(resources, 'pptx');
     const armBinary = native(f.source, 'arm64');
     const x64Binary = path.join(skill, 'node_modules/@img/sharp-darwin-x64/lib/sharp-darwin-x64.node');

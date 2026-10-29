@@ -17,6 +17,7 @@ import { buildKitReferences } from '../../services/kitCapability';
 import type { CoworkImageAttachment, CoworkMessage, CoworkMessageMetadata } from '../../types/cowork';
 import type { MarketplaceKit } from '../../types/kit';
 import type { Skill } from '../../types/skill';
+import { fitImageSize, readBase64ImageSize } from '../../utils/imageDisplaySize';
 import { formatMessageDateTime } from '../../utils/tokenFormat';
 import { parseUserMessageForDisplay } from '../../utils/userMessageDisplay';
 import { extractUserMessageFileAttachments } from '../../utils/userMessageFileAttachments';
@@ -187,6 +188,48 @@ const UserMessageCapabilityBadges: React.FC<{
     </div>
   );
 };
+
+// ── MessageImageThumbnail (local) ───────────────────────────────────────────
+
+// Matches the thumbnail's max-w-[16rem] / max-h-48 limits.
+const MESSAGE_IMAGE_THUMBNAIL_MAX_WIDTH = 256;
+const MESSAGE_IMAGE_THUMBNAIL_MAX_HEIGHT = 192;
+
+const MessageImageThumbnail: React.FC<{
+  image: CoworkImageAttachment | CoworkImageAttachmentPreview;
+  onOpen: (image: ImagePreviewSource) => void;
+}> = React.memo(({ image, onOpen }) => {
+  const src = `data:${image.mimeType};base64,${image.base64Data}`;
+  // Size the box from the image header up front, so the message does not grow
+  // (and shift the conversation) when the thumbnail finishes decoding.
+  const reservedSize = useMemo(() => {
+    const naturalSize = readBase64ImageSize(image.base64Data);
+    return naturalSize
+      ? fitImageSize(naturalSize, MESSAGE_IMAGE_THUMBNAIL_MAX_WIDTH, MESSAGE_IMAGE_THUMBNAIL_MAX_HEIGHT)
+      : null;
+  }, [image.base64Data]);
+
+  return (
+    <div className="relative group">
+      <img
+        src={src}
+        alt={image.name}
+        className="max-h-48 max-w-[16rem] rounded-lg object-contain cursor-pointer border border-border hover:border-primary transition-colors"
+        style={reservedSize ?? undefined}
+        title={image.name}
+        onClick={() => onOpen({
+          src,
+          alt: image.name,
+          name: image.name,
+        })}
+      />
+      <div className="absolute bottom-1 left-1 right-1 flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-black/50 text-white text-[10px] opacity-0 group-hover:opacity-100 transition-opacity truncate pointer-events-none">
+        <PhotoIcon className="h-3 w-3 flex-shrink-0" />
+        <span className="truncate">{image.name}</span>
+      </div>
+    </div>
+  );
+});
 
 // ── UserMessageItem ──────────────────────────────────────────────────────────
 
@@ -379,23 +422,7 @@ const UserMessageItem: React.FC<{
                 {displayImageAttachments.length > 0 && (
                   <div className={`flex flex-wrap gap-2 ${displayContent?.trim() ? 'mt-2' : ''}`}>
                     {displayImageAttachments.map((img, idx) => (
-                      <div key={idx} className="relative group">
-                        <img
-                          src={`data:${img.mimeType};base64,${img.base64Data}`}
-                          alt={img.name}
-                          className="max-h-48 max-w-[16rem] rounded-lg object-contain cursor-pointer border border-border hover:border-primary transition-colors"
-                          title={img.name}
-                          onClick={() => handleImagePreviewOpen({
-                            src: `data:${img.mimeType};base64,${img.base64Data}`,
-                            alt: img.name,
-                            name: img.name,
-                          })}
-                        />
-                        <div className="absolute bottom-1 left-1 right-1 flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-black/50 text-white text-[10px] opacity-0 group-hover:opacity-100 transition-opacity truncate pointer-events-none">
-                          <PhotoIcon className="h-3 w-3 flex-shrink-0" />
-                          <span className="truncate">{img.name}</span>
-                        </div>
-                      </div>
+                      <MessageImageThumbnail key={idx} image={img} onOpen={handleImagePreviewOpen} />
                     ))}
                   </div>
                 )}

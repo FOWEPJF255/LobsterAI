@@ -68,13 +68,18 @@ export interface ImageEditMessageSnapshot {
   regions: ImageRegion[];
   instruction?: string;
 }
+/** Encoded image bytes; the renderer shows them through object URLs instead of multi-MB data URLs. */
+export interface ImageEditSnapshotFile {
+  bytes: Uint8Array;
+  mime: string;
+}
 /** Images read from the immutable request, never from the current editor draft. */
 export interface ImageEditSnapshotImages {
-  dataUrl: string;
+  image: ImageEditSnapshotFile;
   /** Black preserves the source; white is the submitted removal area. */
-  maskDataUrl?: string;
+  mask?: ImageEditSnapshotFile;
   /** The original composited with the submitted drawing, including text and eraser results. */
-  markupDataUrl?: string;
+  markup?: ImageEditSnapshotFile;
 }
 export interface ImageEditStageInput {
   sessionId: string;

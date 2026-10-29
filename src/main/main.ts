@@ -677,7 +677,7 @@ import { StartupProfiler } from './startupProfiler';
 import { SubagentMessageStore } from './subagentMessageStore';
 import { SubagentRunStore } from './subagentRunStore';
 import { createTray, destroyTray, updateTrayMenu, updateTrayReminder } from './trayManager';
-import { videoConfirmationFailure, videoConfirmationQuestions } from './videoGenerationConfirmation';
+import { videoConfirmationFailure, videoConfirmationQuestions, videoConfirmationReferences } from './videoGenerationConfirmation';
 import {
   AppWindowStoreKey,
   MIN_APP_WINDOW_HEIGHT,
@@ -7115,7 +7115,13 @@ if (!gotTheLock) {
       }
 
       if (mediaType === 'video') {
-        const confirmationInput = { model: selectedModel, params, prompt, portalUrl: getPortalTasksUrl() };
+        const references = videoConfirmationReferences(params, source => {
+          if (/^https?:\/\//i.test(source)) return source;
+          if (!source.startsWith('data:image/')) return undefined;
+          const image = nativeImage.createFromDataURL(source);
+          return image.isEmpty() ? undefined : `data:image/jpeg;base64,${image.resize({ height: 96 }).toJPEG(80).toString('base64')}`;
+        });
+        const confirmationInput = { model: selectedModel, params, prompt, portalUrl: getPortalTasksUrl(), references };
         const confirmResponse = await getMcpRuntime().askUserInternal(
           videoConfirmationQuestions(confirmationInput, modelCapability, t), undefined, {
             sessionKey: request.context.sessionKey,
