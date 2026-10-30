@@ -3,15 +3,15 @@ import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState
 
 import { i18nService } from '../../services/i18n';
 import {
+  countUserMessageLines,
   shouldCollapseUserMessage,
   USER_MESSAGE_COLLAPSED_ATTRIBUTE,
   USER_MESSAGE_COLLAPSED_HEIGHT_PX,
   USER_MESSAGE_EXPAND_EVENT,
+  USER_MESSAGE_TEXT_ATTRIBUTE,
 } from './userMessageCollapse';
 
 interface UserMessageCollapsibleProps {
-  /** Logical line count of the text, shown on the expand button when > 1. */
-  lineCount: number;
   children: React.ReactNode;
 }
 
@@ -21,17 +21,25 @@ const COLLAPSED_FADE_MASK = 'linear-gradient(to bottom, black calc(100% - 48px),
  * Clips a long user message to a fixed height with a fade and a show-more
  * toggle. Short messages render untouched.
  */
-const UserMessageCollapsible: React.FC<UserMessageCollapsibleProps> = ({ lineCount, children }) => {
+const UserMessageCollapsible: React.FC<UserMessageCollapsibleProps> = ({ children }) => {
   const rootRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [isCollapsible, setIsCollapsible] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [lineCount, setLineCount] = useState(0);
   const regionId = useId();
 
   useLayoutEffect(() => {
     const content = contentRef.current;
     if (!content) return undefined;
-    const measure = () => setIsCollapsible(shouldCollapseUserMessage(content.offsetHeight));
+    const measure = () => {
+      setIsCollapsible(shouldCollapseUserMessage(content.offsetHeight));
+      setLineCount(Array.from(content.querySelectorAll(`[${USER_MESSAGE_TEXT_ATTRIBUTE}]`))
+        .reduce((total, block) => total + countUserMessageLines(
+          block.getBoundingClientRect().height,
+          Number.parseFloat(getComputedStyle(block).lineHeight),
+        ), 0));
+    };
     measure();
     if (typeof ResizeObserver === 'undefined') return undefined;
     const observer = new ResizeObserver(measure);

@@ -20,10 +20,18 @@ describe('shouldCollapseUserMessage', () => {
 });
 
 describe('countUserMessageLines', () => {
-  test('counts logical lines without a trailing newline', () => {
-    expect(countUserMessageLines('')).toBe(0);
-    expect(countUserMessageLines('one')).toBe(1);
-    expect(countUserMessageLines('one\ntwo\n\nfour\n')).toBe(4);
+  test('counts rendered lines including wrapping, independent of source newlines', () => {
+    expect(countUserMessageLines(23, 23)).toBe(1);
+    expect(countUserMessageLines(989, 23)).toBe(43);
+    expect(countUserMessageLines(1380, 23)).toBe(60);
+    expect(countUserMessageLines(69.001, 23)).toBe(3);
+  });
+
+  test('ignores unmeasurable or hidden text blocks', () => {
+    expect(countUserMessageLines(0, 23)).toBe(0);
+    expect(countUserMessageLines(100, 0)).toBe(0);
+    expect(countUserMessageLines(100, Number.NaN)).toBe(0);
+    expect(countUserMessageLines(Number.POSITIVE_INFINITY, 23)).toBe(0);
   });
 });
 
