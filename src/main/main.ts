@@ -4163,6 +4163,7 @@ const getCoworkEngineRouter = () => {
         getOpenClawEngineManager(),
         {
           normalizeModelRef: normalizeOpenClawModelRef,
+          getModelCatalog: buildAvailableOpenClawProviders,
           onChannelPromptSubmit: (event, sessionId) => {
             getTaskUsageAnalytics().begin(sessionId, {},
               event.conversationState === PromptAnalyticsConversationState.ContinueSession, UsageOrigin.Im);
@@ -5476,6 +5477,13 @@ if (!gotTheLock) {
         if (!syncResult.success) {
           console.error('[OpenClaw] Failed to sync config after app_config update:', syncResult.error);
         }
+      }
+      // IM sessions pinned to a removed provider would fail every message.
+      if (impactDecision.reasons.some(reason => (
+        reason === OpenClawConfigImpactReason.AppProviderConfig
+        || reason === OpenClawConfigImpactReason.AppProviderSecret
+      ))) {
+        void openClawRuntimeAdapter?.reconcileStaleSessionModelOverrides('provider settings changed');
       }
     }
   });

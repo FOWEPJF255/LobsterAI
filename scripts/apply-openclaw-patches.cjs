@@ -671,7 +671,7 @@ const v20260801StrongPatchValidators = {
     {
       file: 'src/auto-reply/reply/get-reply.ts',
       snippets: [
-        'resolveAgentRunCwd(cfg, agentId, optsWithCommandQueueOverride?.cwd) ?? workspaceDir',
+        'getRuntimeConfigSnapshot() ?? cfg,',
         'cwd: runCwd',
       ],
     },
@@ -722,6 +722,19 @@ const v20260801StrongPatchValidators = {
         'accepts the LobsterAI owner while models keep explicit transports',
         'rejects compatibility ownership at model level',
       ],
+    },
+  ],
+  'openclaw-low-level-dispatch-reply-reservation.patch': [
+    {
+      file: 'src/auto-reply/reply/dispatch-from-config.ts',
+      snippets: [
+        'return await dispatchReplyFromConfigWithQueuePolicy(params, true);',
+        'params.dispatcher.markComplete();',
+      ],
+    },
+    {
+      file: 'src/auto-reply/reply/dispatch-from-config.low-level-reservation.test.ts',
+      snippets: ['releases the dispatcher reservation once the channel dispatch settles'],
     },
   ],
   'openclaw-malformed-tool-call-continuation.patch': [

@@ -698,6 +698,29 @@ test('deleteSession removes the continuity capsule row', () => {
   expect(rows.count).toBe(0);
 });
 
+test('listChannelSessionModelOverrides returns IM sessions pinned to their own model', () => {
+  const sessionKey = 'agent:main:moltbot-popo:bot:direct:user@example.com';
+  const im = store.createSession('IM', '/tmp', '', 'local', [], 'main', 'deepseek/deepseek-v4-flash');
+  const imAgentModel = store.createSession('IM agent model', '/tmp');
+  const unmapped = store.createSession('IM without key', '/tmp', '', 'local', [], 'main', 'deepseek/deepseek-v4-flash');
+  store.createSession('Desktop', '/tmp', '', 'local', [], 'main', 'deepseek/deepseek-v4-flash');
+  const insertMapping = db.prepare(
+    `INSERT INTO im_session_mappings (
+      im_conversation_id, platform, cowork_session_id, agent_id, openclaw_session_key, created_at, last_active_at
+    ) VALUES (?, 'popo', ?, 'main', ?, 1, 1)`,
+  );
+  insertMapping.run('direct:user', im.id, sessionKey);
+  insertMapping.run('direct:other', imAgentModel.id, 'agent:main:moltbot-popo:bot:direct:other');
+  insertMapping.run('direct:legacy', unmapped.id, null);
+
+  expect(store.listChannelSessionModelOverrides()).toEqual([
+    { sessionId: im.id, modelOverride: 'deepseek/deepseek-v4-flash', sessionKey },
+  ]);
+
+  store.updateSession(im.id, { modelOverride: '' });
+  expect(store.listChannelSessionModelOverrides()).toEqual([]);
+});
+
 test('forkSession copies the source continuity capsule to the forked session', () => {
   const source = store.createSession('Source', '/tmp');
   store.upsertContinuityCapsule(source.id, {
