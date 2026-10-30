@@ -6,13 +6,18 @@ export const USER_MESSAGE_COLLAPSE_MIN_HEIGHT_PX = 368;
 
 export const USER_MESSAGE_EXPAND_EVENT = 'cowork:user-message-expand';
 export const USER_MESSAGE_COLLAPSED_ATTRIBUTE = 'data-cowork-user-message-collapsed';
+export const USER_MESSAGE_TEXT_ATTRIBUTE = 'data-cowork-user-message-text';
 
 export const shouldCollapseUserMessage = (contentHeight: number): boolean => (
   Number.isFinite(contentHeight) && contentHeight > USER_MESSAGE_COLLAPSE_MIN_HEIGHT_PX
 );
 
-export const countUserMessageLines = (text: string): number => (
-  text ? text.replace(/\n+$/, '').split('\n').length : 0
+// UserMessageContent renders each text block with a uniform line height. Use
+// its layout height so wrapped lines and blank lines count, but images do not.
+export const countUserMessageLines = (height: number, lineHeight: number): number => (
+  Number.isFinite(height) && Number.isFinite(lineHeight) && height > 0 && lineHeight > 0
+    ? Math.round(height / lineHeight)
+    : 0
 );
 
 /**

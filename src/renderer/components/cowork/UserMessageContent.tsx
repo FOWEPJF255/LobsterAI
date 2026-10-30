@@ -1,6 +1,7 @@
 import React from 'react';
 
 import MarkdownContent from '../MarkdownContent';
+import { USER_MESSAGE_TEXT_ATTRIBUTE } from './userMessageCollapse';
 
 const MARKDOWN_IMAGE_LINE_RE = /^\s*!\[[^\]]*\]\((?:file|localfile|https?|data|blob):[^)]+\)\s*$/i;
 
@@ -23,6 +24,7 @@ const flushText = (
   nodes.push(
     <div
       key={`${keyPrefix}-${nodes.length}`}
+      {...{ [USER_MESSAGE_TEXT_ATTRIBUTE]: true }}
       className="whitespace-pre-wrap break-words text-foreground/90"
     >
       {leading ? renderLeading(leading) : null}

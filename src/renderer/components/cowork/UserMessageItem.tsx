@@ -48,7 +48,6 @@ import {
 import { UserMessagePastedTexts } from './PastedTextCards';
 import SelectedTextSnippetBadge from './SelectedTextSnippetBadge';
 import { useKitDetailCatalog } from './useKitDetailCatalog';
-import { countUserMessageLines } from './userMessageCollapse';
 import UserMessageCollapsible from './UserMessageCollapsible';
 import UserMessageContent from './UserMessageContent';
 import UserMessageFileAttachments from './UserMessageFileAttachments';
@@ -455,7 +454,7 @@ const UserMessageItem: React.FC<{
                   />
                 )}
                 {displayContent?.trim() && (
-                  <UserMessageCollapsible lineCount={countUserMessageLines(displayContent)}>
+                  <UserMessageCollapsible>
                     <div data-cowork-search-message-id={message.id}>
                       <UserMessageContent
                         content={displayContent}

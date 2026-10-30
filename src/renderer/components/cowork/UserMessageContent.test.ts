@@ -2,6 +2,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, test } from 'vitest';
 
+import { USER_MESSAGE_TEXT_ATTRIBUTE } from './userMessageCollapse';
 import UserMessageContent from './UserMessageContent';
 
 test('renders numbered user input as plain text instead of a markdown list', () => {
@@ -20,7 +21,7 @@ test('flows leading chips into the first line of text, outside conversation sear
   const html = renderToStaticMarkup(React.createElement(UserMessageContent, { content, leading }));
 
   expect(html).toContain(
-    '<div class="whitespace-pre-wrap break-words text-foreground/90">'
+    `<div ${USER_MESSAGE_TEXT_ATTRIBUTE}="true" class="whitespace-pre-wrap break-words text-foreground/90">`
     + '<span data-cowork-search-exclude="true"><span data-testid="chip">popo-im</span></span>'
     + '这个 skill 是干啥的\n第二行</div>',
   );
@@ -35,5 +36,6 @@ test('puts leading chips in their own block when the message opens with an image
   expect(html.match(/data-testid="chip"/g)).toHaveLength(1);
   expect(chipIndex).toBeGreaterThan(-1);
   expect(chipIndex).toBeLessThan(html.indexOf('example.com/a.png'));
-  expect(html).toContain('<div class="whitespace-pre-wrap break-words text-foreground/90">看看这张图</div>');
+  expect(html.split(`${USER_MESSAGE_TEXT_ATTRIBUTE}="true"`)).toHaveLength(2);
+  expect(html).toContain(`<div ${USER_MESSAGE_TEXT_ATTRIBUTE}="true" class="whitespace-pre-wrap break-words text-foreground/90">看看这张图</div>`);
 });
