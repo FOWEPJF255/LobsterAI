@@ -7000,6 +7000,7 @@ if (!gotTheLock) {
         '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
         '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp',
         '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm',
+        '.mp3': 'audio/mpeg', '.wav': 'audio/wav',
       };
       const resolveRef = async (ref: string): Promise<string> => {
         if (!ref || ref.startsWith('http') || ref.startsWith('oss://') || ref.startsWith('data:')) return ref;
